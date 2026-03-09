@@ -93,7 +93,7 @@ class LEDScoreboard:
     def _render_text(self, text: str, color: tuple = (255, 0, 0)) -> None:
         """Render text to the matrix"""
         if self.matrix is None:
-            logger.debug(f"Mock display text: {text} (color: {color})")
+            logger.info(f"Mock display text: {text} (color: {color})")
             return
 
         try:
@@ -125,7 +125,7 @@ class LEDScoreboard:
     def _render_data(self, data: Dict[str, Any]) -> None:
         """Render structured scoreboard data"""
         if self.matrix is None:
-            logger.debug(f"Mock display data: {data}")
+            logger.info(f"Mock display data: {data}")
             return
 
         try:
