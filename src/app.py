@@ -77,13 +77,14 @@ class ScoreboardApp:
 
             # Initialize MQTT client
             mqtt_config = self.config.get("mqtt", {})
+            subscriptions = mqtt_config.pop("subscriptions", ["scoreboard/data"])
             self.mqtt_client = ScoreboardMQTTClient(**mqtt_config)
             self.mqtt_client.set_message_callback(self._on_mqtt_message)
             self.mqtt_client.connect()
             self.mqtt_client.start()
 
             # Subscribe to topics
-            for topic in mqtt_config.get("subscriptions", ["scoreboard/data"]):
+            for topic in subscriptions:
                 self.mqtt_client.subscribe(topic)
 
             logger.info("Scoreboard application running")
