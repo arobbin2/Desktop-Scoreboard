@@ -19,10 +19,8 @@ print()
 
 # Test 1: Just try to display solid colors
 configurations = [
-    ("Regular mapping slowdown=1", 'regular', 1),
-    ("Regular mapping slowdown=4", 'regular', 4),
-    ("Seengreat adapter slowdown=1", 'seengreat_adapter', 1),
-    ("Seengreat adapter slowdown=4", 'seengreat_adapter', 4),
+    ("Regular mapping (default)", 'regular', 1),
+    ("Seengreat adapter", 'seengreat_adapter', 1),
 ]
 
 for desc, hardware_mapping, gpio_slowdown in configurations:
