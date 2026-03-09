@@ -1,0 +1,33 @@
+# Desktop Scoreboard Configuration
+
+# MQTT Configuration
+mqtt:
+  broker_host: localhost
+  broker_port: 1883
+  client_id: scoreboard
+  username: null  # Set to username if authentication required
+  password: null  # Set to password if authentication required
+  subscriptions:
+    - scoreboard/data
+    - scoreboard/text
+    - scoreboard/control
+
+# LED Matrix Configuration
+matrix:
+  width: 64
+  height: 32
+  brightness: 100
+  gpio_slowdown: 4
+  hardware_mapping: adafruit-hat  # Options: adafruit-hat, regular, etc.
+  chain_length: 1
+  parallel: 1
+
+# Display Configuration
+display:
+  default_text_color: [255, 0, 0]  # RGB red
+  default_bg_color: [0, 0, 0]      # RGB black
+
+# Application Configuration
+app:
+  log_level: INFO
+  mock_hardware: false  # Set to true to test without hardware
