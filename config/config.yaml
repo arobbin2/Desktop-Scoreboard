@@ -30,4 +30,4 @@ display:
 # Application Configuration
 app:
   log_level: INFO
-  mock_hardware: false  # Set to true to test without hardware
+  mock_hardware: true  # Set to true to test without hardware
