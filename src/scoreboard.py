@@ -21,10 +21,10 @@ class LEDScoreboard:
         self,
         width: int = 64,
         height: int = 32,
-        brightness: int = 100,
-        gpio_slowdown: int = 4,
-        hardware_mapping: str = "adafruit-hat",
-        chain_length: int = 1,
+        brightness: int = 90,
+        gpio_slowdown: int = 10,
+        hardware_mapping: str = "regular",
+        chain_length: int = 4,
         parallel: int = 1,
     ):
         """
