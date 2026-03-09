@@ -22,7 +22,7 @@ options.chain_length = 4  # 4 modules horizontally
 options.parallel = 1
 options.brightness = 100
 options.gpio_slowdown = 4
-options.hardware_mapping = 'regular'  # Adjust if needed
+options.hardware_mapping = 'seengreat_adapter'  # Custom Seengreat GPIO mapping
 options.daemon = True
 
 try:
