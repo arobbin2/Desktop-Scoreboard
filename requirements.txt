@@ -1,4 +1,4 @@
-# rpi-rgb-led-matrix>=1.30.0  # Uncomment for hardware mode
+rpi-rgb-led-matrix>=1.30.0  # Uncomment for hardware mode
 Pillow>=10.0.0
 paho-mqtt>=1.6.0
 PyYAML>=6.0

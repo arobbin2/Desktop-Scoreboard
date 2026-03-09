@@ -18,8 +18,8 @@ matrix:
   height: 32
   brightness: 100
   gpio_slowdown: 4
-  hardware_mapping: adafruit-hat  # Options: adafruit-hat, regular, etc.
-  chain_length: 1
+  hardware_mapping: regular  # For Seeed hat, try 'regular' or check docs
+  chain_length: 4
   parallel: 1
 
 # Display Configuration
@@ -30,4 +30,4 @@ display:
 # Application Configuration
 app:
   log_level: INFO
-  mock_hardware: true  # Set to true to test without hardware
+  mock_hardware: false  # Set to true to test without hardware
