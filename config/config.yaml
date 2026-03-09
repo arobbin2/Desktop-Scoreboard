@@ -18,7 +18,7 @@ matrix:
   height: 32
   brightness: 100
   gpio_slowdown: 1
-  hardware_mapping: seengreat_adapter  # Custom Seengreat GPIO mapping
+  hardware_mapping: regular  # Try regular mapping first
   chain_length: 4
   parallel: 1
 
