@@ -1,6 +1,7 @@
 """Main scoreboard controller for LED matrix display"""
 
 import logging
+import re
 from typing import Optional, Dict, Any
 from PIL import Image, ImageDraw, ImageFont
 
@@ -182,31 +183,62 @@ class LEDScoreboard:
             score2 = str(data.get("score2", "0"))[:2]
             clock = str(data.get("clock") or data.get("time") or "--:--")
             status = str(data.get("status") or data.get("period") or "")
+            title = "COMPTON"
+
+            raw_period = (
+                data.get("period_number")
+                or data.get("period_num")
+                or data.get("period")
+                or data.get("quarter")
+                or data.get("qtr")
+                or ""
+            )
+            period_value = ""
+            if isinstance(raw_period, (int, float)):
+                period_value = str(int(raw_period))
+            else:
+                period_text = str(raw_period).strip()
+                if period_text:
+                    digit_match = re.search(r"\d+", period_text)
+                    period_value = digit_match.group(0) if digit_match else period_text.upper()[:2]
+
+            if not period_value and status:
+                status_match = re.search(r"\d+", status)
+                if status_match:
+                    period_value = status_match.group(0)
+
+            if not period_value:
+                period_value = "-"
 
             primary = (255, 255, 255)
             secondary = (255, 255, 0)
 
             side_center_left = int(self.width * 0.11)
             side_center_right = int(self.width * 0.89)
+            period_center_left = int(self.width * 0.34)
             center_x = self.width // 2
 
             team_font = fit_font(team1 if len(team1) >= len(team2) else team2, int(self.width * 0.24), max(11, int(self.height * 0.42)), min_size=9, bold=True)
             score_font = fit_font("88", int(self.width * 0.16), max(14, int(self.height * 0.62)), min_size=12, bold=True)
             clock_font = fit_font(clock, int(self.width * 0.52), max(16, int(self.height * 0.8)), min_size=12, bold=True)
-            status_font = load_font(max(9, int(self.height * 0.3)), bold=True)
+            period_label_font = fit_font("PER", int(self.width * 0.12), max(9, int(self.height * 0.3)), min_size=8, bold=True)
+            period_value_font = fit_font(period_value, int(self.width * 0.12), max(12, int(self.height * 0.56)), min_size=10, bold=True)
+            title_font = fit_font(title, int(self.width * 0.34), max(10, int(self.height * 0.3)), min_size=8, bold=True)
 
             team_top = 1
             score_top = int(self.height * 0.42)
-            clock_top = int((self.height - (draw.textbbox((0, 0), clock, font=clock_font)[3] - draw.textbbox((0, 0), clock, font=clock_font)[1])) / 2)
+            clock_bbox = draw.textbbox((0, 0), clock, font=clock_font)
+            clock_height = clock_bbox[3] - clock_bbox[1]
+            clock_top = max(7, int((self.height - clock_height) / 2))
 
             draw_centered(side_center_left, team_top, team1, team_font, secondary)
             draw_centered(side_center_right, team_top, team2, team_font, secondary)
             draw_centered(side_center_left, score_top, score1, score_font, primary)
             draw_centered(side_center_right, score_top, score2, score_font, primary)
+            draw_centered(period_center_left, team_top, "PER", period_label_font, secondary)
+            draw_centered(period_center_left, score_top, period_value, period_value_font, primary)
+            draw_centered(center_x, 1, title, title_font, secondary)
             draw_centered(center_x, clock_top, clock, clock_font, primary)
-
-            if status:
-                draw_centered(center_x, self.height - int(self.height * 0.3), status.upper()[:20], status_font, secondary)
 
             self.matrix.SetImage(image)
             logger.debug(f"Rendered data: {data}")
