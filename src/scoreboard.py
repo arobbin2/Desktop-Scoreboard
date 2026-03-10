@@ -186,17 +186,17 @@ class LEDScoreboard:
             primary = (230, 230, 230)
             secondary = (150, 150, 150)
 
-            side_center_left = int(self.width * 0.12)
-            side_center_right = int(self.width * 0.88)
+            side_center_left = int(self.width * 0.11)
+            side_center_right = int(self.width * 0.89)
             center_x = self.width // 2
 
-            team_font = fit_font(team1 if len(team1) >= len(team2) else team2, int(self.width * 0.18), max(9, int(self.height * 0.32)), min_size=8, bold=False)
-            score_font = fit_font("88", int(self.width * 0.1), max(12, int(self.height * 0.48)), min_size=10, bold=True)
+            team_font = fit_font(team1 if len(team1) >= len(team2) else team2, int(self.width * 0.24), max(11, int(self.height * 0.42)), min_size=9, bold=True)
+            score_font = fit_font("88", int(self.width * 0.16), max(14, int(self.height * 0.62)), min_size=12, bold=True)
             clock_font = fit_font(clock, int(self.width * 0.52), max(16, int(self.height * 0.8)), min_size=12, bold=True)
-            status_font = load_font(max(8, int(self.height * 0.24)), bold=False)
+            status_font = load_font(max(9, int(self.height * 0.3)), bold=True)
 
             team_top = 1
-            score_top = int(self.height * 0.45)
+            score_top = int(self.height * 0.42)
             clock_top = int((self.height - (draw.textbbox((0, 0), clock, font=clock_font)[3] - draw.textbbox((0, 0), clock, font=clock_font)[1])) / 2)
 
             draw_centered(side_center_left, team_top, team1, team_font, secondary)
@@ -206,7 +206,7 @@ class LEDScoreboard:
             draw_centered(center_x, clock_top, clock, clock_font, primary)
 
             if status:
-                draw_centered(center_x, self.height - int(self.height * 0.25), status.upper()[:20], status_font, secondary)
+                draw_centered(center_x, self.height - int(self.height * 0.3), status.upper()[:20], status_font, secondary)
 
             self.matrix.SetImage(image)
             logger.debug(f"Rendered data: {data}")
