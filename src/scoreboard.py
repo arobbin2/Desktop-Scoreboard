@@ -28,6 +28,7 @@ class LEDScoreboard:
         chain_length: int = 4,
         parallel: int = 1,
         led_rgb_sequence: str = "RGB",
+        title_text: str = "COMPTON",
     ):
         """
         Initialize LED matrix scoreboard
@@ -40,10 +41,13 @@ class LEDScoreboard:
             hardware_mapping: GPIO mapping type (adafruit-hat, regular, etc.)
             chain_length: Number of chained matrices horizontally
             parallel: Number of parallel matrices
+            title_text: Header text shown above the center clock in data mode
         """
         self.width = width * chain_length
         self.height = height * parallel
         self.brightness = brightness
+        resolved_title = str(title_text).strip()
+        self.title_text = resolved_title if resolved_title else "COMPTON"
         self.matrix = None
         sequence = str(led_rgb_sequence).upper()
         if sorted(sequence) != ["B", "G", "R"]:
@@ -183,7 +187,7 @@ class LEDScoreboard:
             score2 = str(data.get("score2", "0"))[:2]
             clock = str(data.get("clock") or data.get("time") or "--:--")
             status = str(data.get("status") or data.get("period") or "")
-            title = "COMPTON"
+            title = self.title_text.upper()[:12]
 
             raw_period = (
                 data.get("period_number")

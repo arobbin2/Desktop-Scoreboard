@@ -22,6 +22,7 @@ matrix:
   chain_length: 4
   parallel: 1
   led_rgb_sequence: RBG
+  title_text: PURCELL PAVILLION  # Header above center clock in scoreboard data view
 
 # Display Configuration
 display:

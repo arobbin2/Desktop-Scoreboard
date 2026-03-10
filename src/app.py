@@ -90,6 +90,7 @@ class ScoreboardApp:
                 "brightness": 100,
                 "gpio_slowdown": 4,
                 "hardware_mapping": "adafruit-hat",
+                "title_text": "COMPTON",
             },
         }
 
