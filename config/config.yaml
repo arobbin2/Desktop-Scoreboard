@@ -38,4 +38,5 @@ clock:
   enabled: true
   format: "%H:%M:%S"
   color: [255, 255, 0]  # Clock font/text color (RGB)
-  idle_after_seconds: 0  # Set >0 to show clock only after MQTT inactivity
+  font_size: 30  # Clock font size in pixels; adjust for readability/layout
+  idle_after_seconds: 60  # Hold MQTT text/data this many seconds before clock returns

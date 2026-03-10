@@ -99,10 +99,15 @@ class LEDScoreboard:
         self.current_data = data
         self._render_data(data)
 
-    def display_clock(self, text: str, color: tuple = (255, 255, 0)) -> None:
+    def display_clock(
+        self,
+        text: str,
+        color: tuple = (255, 255, 0),
+        font_size: Optional[int] = None,
+    ) -> None:
         """Display a clock string with a larger font for readability."""
         self.current_text = text
-        self._render_clock(text, color)
+        self._render_clock(text, color, font_size)
 
     def _render_text(self, text: str, color: tuple = (255, 0, 0)) -> None:
         """Render text to the matrix"""
@@ -181,7 +186,12 @@ class LEDScoreboard:
         except Exception as e:
             logger.error(f"Error rendering data: {e}")
 
-    def _render_clock(self, text: str, color: tuple = (255, 255, 0)) -> None:
+    def _render_clock(
+        self,
+        text: str,
+        color: tuple = (255, 255, 0),
+        font_size: Optional[int] = None,
+    ) -> None:
         """Render larger clock text centered on the matrix."""
         if self.matrix is None:
             logger.info(f"Mock display clock: {text} (color: {color})")
@@ -191,10 +201,11 @@ class LEDScoreboard:
             image = Image.new("RGB", (self.width, self.height), color=(0, 0, 0))
             draw = ImageDraw.Draw(image)
 
-            font_size = max(20, min(24, self.height - 0))
+            resolved_font_size = font_size if font_size is not None else max(20, min(24, self.height))
+            resolved_font_size = max(8, int(resolved_font_size))
             try:
                 font = ImageFont.truetype(
-                    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size
+                    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", resolved_font_size
                 )
             except OSError:
                 font = ImageFont.load_default()
@@ -202,8 +213,8 @@ class LEDScoreboard:
             bbox = draw.textbbox((0, 0), text, font=font)
             text_width = bbox[2] - bbox[0]
             text_height = bbox[3] - bbox[1]
-            x = max(0, (self.width - text_width) // 2)
-            y = max(0, (self.height - text_height) // 2)
+            x = ((self.width - text_width) // 2) - bbox[0]
+            y = ((self.height - text_height) // 2) - bbox[1]
 
             draw.text((x, y), text, fill=color, font=font)
             self.matrix.SetImage(image)

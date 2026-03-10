@@ -38,12 +38,24 @@ class ScoreboardApp:
         self.clock_enabled = bool(clock_config.get("enabled", False))
         self.clock_format = str(clock_config.get("format", "%H:%M:%S"))
         self.clock_idle_after_seconds = float(clock_config.get("idle_after_seconds", 0))
+        self.clock_font_size: Optional[int] = None
+
+        raw_font_size = clock_config.get("font_size")
+        if raw_font_size is not None:
+            try:
+                parsed_font_size = int(raw_font_size)
+                if parsed_font_size > 0:
+                    self.clock_font_size = parsed_font_size
+                else:
+                    logger.warning("clock.font_size must be > 0. Using automatic sizing.")
+            except (TypeError, ValueError):
+                logger.warning("Invalid clock.font_size value. Using automatic sizing.")
 
         color = clock_config.get("color", [255, 255, 0])
         if isinstance(color, list) and len(color) == 3:
             self.clock_color: Tuple[int, int, int] = (int(color[0]), int(color[1]), int(color[2]))
         else:
-            self.clock_color = (0, 255, 0)
+            self.clock_color = (255, 255, 0)
 
         # Set up signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -156,7 +168,11 @@ class ScoreboardApp:
 
         self.last_clock_second = current_second
         clock_text = time.strftime(self.clock_format, time.localtime(now))
-        self.scoreboard.display_clock(clock_text, color=self.clock_color)
+        self.scoreboard.display_clock(
+            clock_text,
+            color=self.clock_color,
+            font_size=self.clock_font_size,
+        )
 
     def _signal_handler(self, signum, frame):
         """Handle termination signals"""
