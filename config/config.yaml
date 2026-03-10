@@ -21,6 +21,7 @@ matrix:
   hardware_mapping: regular  # Regular GPIO mapping
   chain_length: 4
   parallel: 1
+  led_rgb_sequence: RBG
 
 # Display Configuration
 display:
