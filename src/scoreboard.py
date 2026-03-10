@@ -183,8 +183,8 @@ class LEDScoreboard:
             clock = str(data.get("clock") or data.get("time") or "--:--")
             status = str(data.get("status") or data.get("period") or "")
 
-            primary = (230, 230, 230)
-            secondary = (150, 150, 150)
+            primary = (255, 255, 255)
+            secondary = (255, 255, 0)
 
             side_center_left = int(self.width * 0.11)
             side_center_right = int(self.width * 0.89)
