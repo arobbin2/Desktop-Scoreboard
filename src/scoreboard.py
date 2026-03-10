@@ -26,7 +26,7 @@ class LEDScoreboard:
         hardware_mapping: str = "regular",
         chain_length: int = 4,
         parallel: int = 1,
-        led_rgb_sequence=RBG,
+        led_rgb_sequence: str = "RGB",
     ):
         """
         Initialize LED matrix scoreboard
@@ -44,6 +44,12 @@ class LEDScoreboard:
         self.height = height * parallel
         self.brightness = brightness
         self.matrix = None
+        sequence = str(led_rgb_sequence).upper()
+        if sorted(sequence) != ["B", "G", "R"]:
+            logger.warning(
+                f"Invalid led_rgb_sequence '{led_rgb_sequence}'. Falling back to 'RGB'."
+            )
+            sequence = "RGB"
 
         if RGBMatrix is not None:
             try:
@@ -55,6 +61,7 @@ class LEDScoreboard:
                 options.hardware_mapping = hardware_mapping
                 options.chain_length = chain_length
                 options.parallel = parallel
+                options.led_rgb_sequence = sequence
                 # Keep process attached for service managers like systemd.
                 options.daemon = False
 
