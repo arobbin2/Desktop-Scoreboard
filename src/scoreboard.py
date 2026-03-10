@@ -216,6 +216,7 @@ class LEDScoreboard:
 
             primary = (255, 255, 255)
             secondary = (255, 255, 0)
+            period_label_color = (255, 0, 0)
 
             side_center_left = int(self.width * 0.11)
             side_center_right = int(self.width * 0.89)
@@ -244,7 +245,7 @@ class LEDScoreboard:
             draw_centered(side_center_right, team_top, team2, team_font, secondary)
             draw_centered(side_center_left, score_top, score1, score_font, primary)
             draw_centered(side_center_right, score_top, score2, score_font, primary)
-            draw_centered(period_center_left, team_top, "PER", period_label_font, secondary)
+            draw_centered(period_center_left, team_top, "PER", period_label_font, period_label_color)
             draw_centered(period_center_left, score_top, period_value, period_value_font, primary)
             draw_centered(center_x, title_top, title, title_font, secondary)
             draw_centered(center_x, clock_top, clock, clock_font, primary)
