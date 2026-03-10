@@ -3,6 +3,7 @@
 import logging
 import signal
 import sys
+import time
 import yaml
 from typing import Dict, Any
 
@@ -39,8 +40,11 @@ class ScoreboardApp:
         """Load configuration from YAML file"""
         try:
             with open(config_path, "r") as f:
-                config = yaml.safe_load(f)
+                config = yaml.safe_load(f) or {}
             logger.info(f"Configuration loaded from {config_path}")
+            if not isinstance(config, dict):
+                logger.warning("Config root is not a mapping. Using defaults.")
+                return self._get_default_config()
             return config
         except FileNotFoundError:
             logger.warning(f"Config file not found: {config_path}. Using defaults.")
@@ -71,12 +75,12 @@ class ScoreboardApp:
 
         try:
             # Initialize LED matrix
-            matrix_config = self.config.get("matrix", {})
+            matrix_config = self.config.get("matrix") or {}
             self.scoreboard = LEDScoreboard(**matrix_config)
             self.scoreboard.display_text("Ready", color=(0, 255, 0))
 
             # Initialize MQTT client
-            mqtt_config = self.config.get("mqtt", {})
+            mqtt_config = self.config.get("mqtt") or {}
             subscriptions = mqtt_config.pop("subscriptions", ["scoreboard/data"])
             self.mqtt_client = ScoreboardMQTTClient(**mqtt_config)
             self.mqtt_client.set_message_callback(self._on_mqtt_message)
@@ -91,7 +95,7 @@ class ScoreboardApp:
 
             # Keep the application running
             while self.running:
-                pass
+                time.sleep(0.1)
 
         except Exception as e:
             logger.error(f"Error starting application: {e}", exc_info=True)
@@ -126,6 +130,9 @@ class ScoreboardApp:
 
     def stop(self) -> None:
         """Stop the scoreboard application"""
+        if not self.running:
+            return
+
         logger.info("Stopping scoreboard application")
         self.running = False
 
@@ -136,7 +143,6 @@ class ScoreboardApp:
             self.scoreboard.shutdown()
 
         logger.info("Scoreboard application stopped")
-        sys.exit(0)
 
 
 def main():
