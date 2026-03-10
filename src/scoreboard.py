@@ -54,7 +54,8 @@ class LEDScoreboard:
                 options.hardware_mapping = hardware_mapping
                 options.chain_length = chain_length
                 options.parallel = parallel
-                options.daemon = True  # Allow daemon mode
+                # Keep process attached for service managers like systemd.
+                options.daemon = False
 
                 self.matrix = RGBMatrix(options=options)
                 logger.info(f"LED Matrix initialized: {self.width}x{self.height}")
