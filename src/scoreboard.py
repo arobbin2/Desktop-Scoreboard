@@ -215,7 +215,7 @@ class LEDScoreboard:
 
             side_center_left = int(self.width * 0.11)
             side_center_right = int(self.width * 0.89)
-            period_center_left = int(self.width * 0.34)
+            period_center_left = int(self.width * 0.28)
             center_x = self.width // 2
 
             team_font = fit_font(team1 if len(team1) >= len(team2) else team2, int(self.width * 0.24), max(11, int(self.height * 0.42)), min_size=9, bold=True)
@@ -227,9 +227,14 @@ class LEDScoreboard:
 
             team_top = 1
             score_top = int(self.height * 0.42)
+            title_bbox = draw.textbbox((0, 0), title, font=title_font)
+            title_height = title_bbox[3] - title_bbox[1]
+            title_top = 1
+            title_bottom = title_top + title_height
             clock_bbox = draw.textbbox((0, 0), clock, font=clock_font)
             clock_height = clock_bbox[3] - clock_bbox[1]
-            clock_top = max(7, int((self.height - clock_height) / 2))
+            centered_clock_top = int((self.height - clock_height) / 2) + 2
+            clock_top = max(title_bottom + 2, centered_clock_top)
 
             draw_centered(side_center_left, team_top, team1, team_font, secondary)
             draw_centered(side_center_right, team_top, team2, team_font, secondary)
@@ -237,7 +242,7 @@ class LEDScoreboard:
             draw_centered(side_center_right, score_top, score2, score_font, primary)
             draw_centered(period_center_left, team_top, "PER", period_label_font, secondary)
             draw_centered(period_center_left, score_top, period_value, period_value_font, primary)
-            draw_centered(center_x, 1, title, title_font, secondary)
+            draw_centered(center_x, title_top, title, title_font, secondary)
             draw_centered(center_x, clock_top, clock, clock_font, primary)
 
             self.matrix.SetImage(image)
