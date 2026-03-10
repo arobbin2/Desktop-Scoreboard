@@ -151,35 +151,62 @@ class LEDScoreboard:
             image = Image.new("RGB", (self.width, self.height), color=(0, 0, 0))
             draw = ImageDraw.Draw(image)
 
-            try:
-                font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 12)
-                small_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 8)
-            except OSError:
-                font = ImageFont.load_default()
-                small_font = ImageFont.load_default()
+            def load_font(size: int, bold: bool = False) -> ImageFont.ImageFont:
+                path = (
+                    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+                    if bold
+                    else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+                )
+                try:
+                    return ImageFont.truetype(path, max(8, int(size)))
+                except OSError:
+                    return ImageFont.load_default()
 
-            # Example layout: team1 score1 vs team2 score2 with clock
-            score1 = data.get("score1", "0")
-            score2 = data.get("score2", "0")
-            team1 = data.get("team1", "T1")[:3]  # Truncate to 3 chars
-            team2 = data.get("team2", "T2")[:3]
-            clock = data.get("clock", "")
+            def fit_font(text: str, max_width: int, max_size: int, min_size: int = 8, bold: bool = False) -> ImageFont.ImageFont:
+                for size in range(max_size, min_size - 1, -1):
+                    candidate = load_font(size, bold=bold)
+                    bbox = draw.textbbox((0, 0), text, font=candidate)
+                    if (bbox[2] - bbox[0]) <= max_width:
+                        return candidate
+                return load_font(min_size, bold=bold)
 
-            # Draw clock in top right if provided
-            if clock:
-                draw.text((self.width - 20, 2), str(clock), fill=(100, 100, 255), font=small_font)
+            def draw_centered(cx: int, top: int, text: str, font: ImageFont.ImageFont, fill: tuple) -> None:
+                bbox = draw.textbbox((0, 0), text, font=font)
+                x = cx - ((bbox[2] - bbox[0]) // 2) - bbox[0]
+                y = top - bbox[1]
+                draw.text((x, y), text, font=font, fill=fill)
 
-            # Draw teams and scores
-            draw.text((2, 2), team1, fill=(255, 0, 0), font=small_font)
-            draw.text((22, 2), str(score1), fill=(0, 255, 0), font=font)
-            draw.text((40, 2), "vs", fill=(255, 255, 0), font=small_font)
-            draw.text((50, 2), str(score2), fill=(0, 255, 0), font=font)
-            draw.text((2, 20), team2, fill=(255, 0, 0), font=small_font)
+            team1 = str(data.get("team1", "HOME")).upper()[:4]
+            team2 = str(data.get("team2", "AWAY")).upper()[:4]
+            score1 = str(data.get("score1", "0"))[:2]
+            score2 = str(data.get("score2", "0"))[:2]
+            clock = str(data.get("clock") or data.get("time") or "--:--")
+            status = str(data.get("status") or data.get("period") or "")
 
-            # Draw status if provided
-            status = data.get("status", "")
+            primary = (230, 230, 230)
+            secondary = (150, 150, 150)
+
+            side_center_left = int(self.width * 0.12)
+            side_center_right = int(self.width * 0.88)
+            center_x = self.width // 2
+
+            team_font = fit_font(team1 if len(team1) >= len(team2) else team2, int(self.width * 0.18), max(9, int(self.height * 0.32)), min_size=8, bold=False)
+            score_font = fit_font("88", int(self.width * 0.1), max(12, int(self.height * 0.48)), min_size=10, bold=True)
+            clock_font = fit_font(clock, int(self.width * 0.52), max(16, int(self.height * 0.8)), min_size=12, bold=True)
+            status_font = load_font(max(8, int(self.height * 0.24)), bold=False)
+
+            team_top = 1
+            score_top = int(self.height * 0.45)
+            clock_top = int((self.height - (draw.textbbox((0, 0), clock, font=clock_font)[3] - draw.textbbox((0, 0), clock, font=clock_font)[1])) / 2)
+
+            draw_centered(side_center_left, team_top, team1, team_font, secondary)
+            draw_centered(side_center_right, team_top, team2, team_font, secondary)
+            draw_centered(side_center_left, score_top, score1, score_font, primary)
+            draw_centered(side_center_right, score_top, score2, score_font, primary)
+            draw_centered(center_x, clock_top, clock, clock_font, primary)
+
             if status:
-                draw.text((2, 28), status, fill=(255, 255, 255), font=small_font)
+                draw_centered(center_x, self.height - int(self.height * 0.25), status.upper()[:20], status_font, secondary)
 
             self.matrix.SetImage(image)
             logger.debug(f"Rendered data: {data}")
