@@ -174,6 +174,11 @@ class LEDScoreboard:
             return
 
         try:
+            # Prefer the library-native clear call for reliable panel blanking.
+            self.matrix.Clear()
+
+            # Keep an explicit black frame as a fallback for adapters that
+            # require an image push to fully clear latched pixels.
             image = Image.new("RGB", (self.width, self.height), color=(0, 0, 0))
             self.matrix.SetImage(image)
             logger.debug("Display cleared")

@@ -16,9 +16,9 @@ mqtt:
 matrix:
   width: 64
   height: 32
-  brightness: 100
-  gpio_slowdown: 1
-  hardware_mapping: seengreat_adapter  # Custom Seengreat GPIO mapping
+  brightness: 90
+  gpio_slowdown: 10
+  hardware_mapping: Regular  # Regular GPIO mapping
   chain_length: 4
   parallel: 1
 

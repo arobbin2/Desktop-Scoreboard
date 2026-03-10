@@ -19,11 +19,13 @@ print()
 
 # Test 1: Just try to display solid colors
 configurations = [
-    ("Regular mapping (default)", 'regular', 1),
-    ("Seengreat adapter", 'seengreat_adapter', 1),
+    ("Regular single panel", 'regular', 1, 4),
+    ("Regular 4-panel", 'regular', 4, 4),
+    ("Seengreat single panel", 'seengreat_adapter', 1, 1),
+    ("Seengreat 4-panel", 'seengreat_adapter', 4, 1),
 ]
 
-for desc, hardware_mapping, gpio_slowdown in configurations:
+for desc, hardware_mapping, chain_length, gpio_slowdown in configurations:
     print(f"\n{'='*70}")
     print(f"Testing: {desc}")
     print('='*70)
@@ -38,14 +40,15 @@ for desc, hardware_mapping, gpio_slowdown in configurations:
         options.brightness = 100
         options.gpio_slowdown = gpio_slowdown
         options.hardware_mapping = hardware_mapping
-        options.daemon = True
+        options.daemon = False  # Try without daemon
         
         print("2. Initializing matrix...")
         matrix = RGBMatrix(options=options)
         print("   ✓ Matrix initialized")
         
         print("3. Creating black image...")
-        image = Image.new("RGB", (256, 32), color=(0, 0, 0))
+        total_width = 64 * chain_length
+        image = Image.new("RGB", (total_width, 32), color=(0, 0, 0))
         
         print("4. Calling Clear()...")
         matrix.Clear()
@@ -58,7 +61,7 @@ for desc, hardware_mapping, gpio_slowdown in configurations:
         time.sleep(1)
         
         print("6. Creating red image...")
-        image = Image.new("RGB", (256, 32), color=(255, 0, 0))
+        image = Image.new("RGB", (total_width, 32), color=(255, 0, 0))
         
         print("7. Setting red image...")
         matrix.SetImage(image)
@@ -67,7 +70,7 @@ for desc, hardware_mapping, gpio_slowdown in configurations:
         time.sleep(1)
         
         print("8. Creating green image...")
-        image = Image.new("RGB", (256, 32), color=(0, 255, 0))
+        image = Image.new("RGB", (total_width, 32), color=(0, 255, 0))
         
         print("9. Setting green image...")
         matrix.SetImage(image)
