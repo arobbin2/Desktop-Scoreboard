@@ -37,5 +37,5 @@ app:
 clock:
   enabled: true
   format: "%H:%M:%S"
-  color: [0, 255, 0]
+  color: [255, 255, 0]  # Clock font/text color (RGB)
   idle_after_seconds: 0  # Set >0 to show clock only after MQTT inactivity

@@ -39,7 +39,7 @@ class ScoreboardApp:
         self.clock_format = str(clock_config.get("format", "%H:%M:%S"))
         self.clock_idle_after_seconds = float(clock_config.get("idle_after_seconds", 0))
 
-        color = clock_config.get("color", [0, 255, 0])
+        color = clock_config.get("color", [255, 255, 0])
         if isinstance(color, list) and len(color) == 3:
             self.clock_color: Tuple[int, int, int] = (int(color[0]), int(color[1]), int(color[2]))
         else:

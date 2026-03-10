@@ -181,7 +181,7 @@ class LEDScoreboard:
         except Exception as e:
             logger.error(f"Error rendering data: {e}")
 
-    def _render_clock(self, text: str, color: tuple = (0, 255, 0)) -> None:
+    def _render_clock(self, text: str, color: tuple = (255, 255, 0)) -> None:
         """Render larger clock text centered on the matrix."""
         if self.matrix is None:
             logger.info(f"Mock display clock: {text} (color: {color})")
