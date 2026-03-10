@@ -16,7 +16,7 @@ mqtt:
 matrix:
   width: 64
   height: 32
-  brightness: 90
+  brightness: 99
   gpio_slowdown: 10
   hardware_mapping: regular  # Regular GPIO mapping
   chain_length: 4
