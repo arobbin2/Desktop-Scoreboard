@@ -99,7 +99,7 @@ class LEDScoreboard:
         self.current_data = data
         self._render_data(data)
 
-    def display_clock(self, text: str, color: tuple = (0, 255, 0)) -> None:
+    def display_clock(self, text: str, color: tuple = (255, 255, 0)) -> None:
         """Display a clock string with a larger font for readability."""
         self.current_text = text
         self._render_clock(text, color)
@@ -188,7 +188,7 @@ class LEDScoreboard:
             return
 
         try:
-            image = Image.new("RGB", (self.width, self.height), color=(0, 0, 255))
+            image = Image.new("RGB", (self.width, self.height), color=(0, 0, 0))
             draw = ImageDraw.Draw(image)
 
             font_size = max(20, min(24, self.height - 0))
