@@ -26,6 +26,7 @@ class LEDScoreboard:
         hardware_mapping: str = "regular",
         chain_length: int = 4,
         parallel: int = 1,
+        led_rgb_sequence=RBG,
     ):
         """
         Initialize LED matrix scoreboard
@@ -180,10 +181,10 @@ class LEDScoreboard:
             return
 
         try:
-            image = Image.new("RGB", (self.width, self.height), color=(0, 0, 0))
+            image = Image.new("RGB", (self.width, self.height), color=(0, 0, 255))
             draw = ImageDraw.Draw(image)
 
-            font_size = max(12, min(24, self.height - 4))
+            font_size = max(20, min(24, self.height - 0))
             try:
                 font = ImageFont.truetype(
                     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size
