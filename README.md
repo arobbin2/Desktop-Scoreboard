@@ -65,7 +65,8 @@ The `rpi-rgb-led-matrix` library requires special build-time setup:
 cd /tmp
 git clone https://github.com/hzeller/rpi-rgb-led-matrix.git
 cd rpi-rgb-led-matrix
-make install-python PYTHON=$(which python3)
+# Build and install Python bindings from source
+python3 -m pip install --break-system-packages .
 cd ~/Desktop-Scoreboard
 ```
 
@@ -89,9 +90,10 @@ mqtt:
 matrix:
   width: 64                        # Panel width in pixels
   height: 32                       # Panel height in pixels
-  brightness: 100
-  hardware_mapping: adafruit-hat   # See rpi-rgb-led-matrix docs for options
-  chain_length: 1                  # Number of chained panels horizontally
+  brightness: 40
+  gpio_slowdown: 10
+  hardware_mapping: regular        # Known-good default for direct GPIO wiring
+  chain_length: 4                  # Number of chained panels horizontally
   parallel: 1                      # Number of parallel chains
 ```
 
@@ -121,15 +123,20 @@ sudo nano /etc/systemd/system/scoreboard.service
 ```ini
 [Unit]
 Description=Desktop Scoreboard
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
-User=pi
-WorkingDirectory=/home/pi/Desktop-Scoreboard
-ExecStart=/home/pi/Desktop-Scoreboard/venv/bin/python3 -m src.app
-Restart=on-failure
-RestartSec=10
+User=root
+Group=root
+WorkingDirectory=/home/techserv/Desktop-Scoreboard
+Environment=HOME=/home/techserv
+Environment=PYTHONPATH=/home/techserv/Desktop-Scoreboard:/home/techserv/.local/lib/python3.13/site-packages
+ExecStart=/usr/bin/python3 -m src.app
+Restart=always
+RestartSec=2
+TimeoutStopSec=10
 
 [Install]
 WantedBy=multi-user.target
@@ -139,8 +146,8 @@ Then:
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable scoreboard
-sudo systemctl start scoreboard
-sudo systemctl status scoreboard
+sudo systemctl restart scoreboard
+sudo systemctl status scoreboard --no-pager -l
 ```
 
 ## MQTT Message Format
@@ -235,11 +242,21 @@ Desktop-Scoreboard/
 - Ensure running with `sudo` on Raspberry Pi
 - Check GPIO permissions: `groups $(whoami) | grep gpio`
 - Try mock mode first to verify the application logic
+- If the library reports `snd_bcm2835` conflict, disable Pi onboard audio and reboot
+
+### Service Starts Then Immediately Stops
+
+- If logs show `Starting scoreboard application` then `Deactivated successfully`, confirm you have the latest code where matrix daemon mode is disabled for systemd
+- Run foreground once to compare behavior:
+  - `sudo -E env PYTHONPATH="$HOME/.local/lib/python3.13/site-packages" python3 -m src.app`
+- Verify service environment includes project + user site-packages in `PYTHONPATH`
 
 ### Display Not Showing
 
-- Verify LED matrix power supply
-- Check GPIO pin configuration matches your hardware
+- Verify LED matrix power supply and ribbon orientation
+- Confirm `hardware_mapping` is lowercase `regular` unless you installed a custom mapping build
+- Run a direct pixel test to isolate app vs hardware:
+  - `sudo -E env PYTHONPATH="$HOME/.local/lib/python3.13/site-packages" python3 -c "from rgbmatrix import RGBMatrix,RGBMatrixOptions; import time; o=RGBMatrixOptions(); o.rows=32; o.cols=64; o.chain_length=1; o.parallel=1; o.gpio_slowdown=10; o.hardware_mapping='regular'; m=RGBMatrix(options=o); c=m.CreateFrameCanvas(); c.Fill(255,0,0); m.SwapOnVSync(c); time.sleep(4)"`
 - Review logs: `journalctl -u scoreboard -f` (if using systemd)
 
 ## License

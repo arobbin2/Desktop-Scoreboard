@@ -31,3 +31,10 @@ display:
 app:
   log_level: INFO
   mock_hardware: false  # Set to true to test without hardware
+
+# Clock Display Configuration
+clock:
+  enabled: true
+  format: "%H:%M:%S"
+  color: [0, 255, 0]
+  idle_after_seconds: 0  # Set >0 to show clock only after MQTT inactivity

@@ -5,7 +5,7 @@ import signal
 import sys
 import time
 import yaml
-from typing import Dict, Any
+from typing import Dict, Any, Optional, Tuple
 
 from src.mqtt_client import ScoreboardMQTTClient
 from src.scoreboard import LEDScoreboard
@@ -31,6 +31,19 @@ class ScoreboardApp:
         self.mqtt_client: Optional[ScoreboardMQTTClient] = None
         self.scoreboard: Optional[LEDScoreboard] = None
         self.running = False
+        self.last_message_time = 0.0
+        self.last_clock_second: Optional[int] = None
+
+        clock_config = self.config.get("clock") or {}
+        self.clock_enabled = bool(clock_config.get("enabled", False))
+        self.clock_format = str(clock_config.get("format", "%H:%M:%S"))
+        self.clock_idle_after_seconds = float(clock_config.get("idle_after_seconds", 0))
+
+        color = clock_config.get("color", [0, 255, 0])
+        if isinstance(color, list) and len(color) == 3:
+            self.clock_color: Tuple[int, int, int] = (int(color[0]), int(color[1]), int(color[2]))
+        else:
+            self.clock_color = (0, 255, 0)
 
         # Set up signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -95,6 +108,7 @@ class ScoreboardApp:
 
             # Keep the application running
             while self.running:
+                self._maybe_render_clock()
                 time.sleep(0.1)
 
         except Exception as e:
@@ -104,6 +118,7 @@ class ScoreboardApp:
     def _on_mqtt_message(self, topic: str, payload: Any) -> None:
         """Handle incoming MQTT message"""
         logger.debug(f"Received message on {topic}: {payload}")
+        self.last_message_time = time.time()
 
         try:
             if self.scoreboard is None:
@@ -122,6 +137,26 @@ class ScoreboardApp:
 
         except Exception as e:
             logger.error(f"Error processing MQTT message: {e}", exc_info=True)
+
+    def _maybe_render_clock(self) -> None:
+        """Render a live clock when enabled and not actively showing MQTT updates."""
+        if not self.clock_enabled or self.scoreboard is None:
+            return
+
+        now = time.time()
+
+        # If configured, only show clock after a quiet period since last MQTT update.
+        if self.clock_idle_after_seconds > 0 and self.last_message_time > 0:
+            if (now - self.last_message_time) < self.clock_idle_after_seconds:
+                return
+
+        current_second = int(now)
+        if self.last_clock_second == current_second:
+            return
+
+        self.last_clock_second = current_second
+        clock_text = time.strftime(self.clock_format, time.localtime(now))
+        self.scoreboard.display_clock(clock_text, color=self.clock_color)
 
     def _signal_handler(self, signum, frame):
         """Handle termination signals"""
