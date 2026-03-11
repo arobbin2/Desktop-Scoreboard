@@ -41,3 +41,11 @@ clock:
   color: [255, 255, 0]  # Clock font/text color (RGB)
   font_size: 30  # Clock font size in pixels; adjust for readability/layout
   idle_after_seconds: 60  # Hold MQTT text/data this many seconds before clock returns
+  weather:
+    enabled: true
+    latitude: 41.7056   # Notre Dame, IN
+    longitude: -86.2353
+    unit: F
+    color: [0, 102, 255]  # Temperature text color (blue)
+    refresh_seconds: 600  # Re-fetch every 10 minutes
+    timeout_seconds: 2.5

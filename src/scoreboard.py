@@ -109,10 +109,12 @@ class LEDScoreboard:
         text: str,
         color: tuple = (255, 255, 0),
         font_size: Optional[int] = None,
+        right_text: Optional[str] = None,
+        right_text_color: tuple = (0, 102, 255),
     ) -> None:
         """Display a clock string with a larger font for readability."""
         self.current_text = text
-        self._render_clock(text, color, font_size)
+        self._render_clock(text, color, font_size, right_text, right_text_color)
 
     def _render_text(self, text: str, color: tuple = (255, 0, 0)) -> None:
         """Render text to the matrix"""
@@ -260,10 +262,18 @@ class LEDScoreboard:
         text: str,
         color: tuple = (255, 255, 0),
         font_size: Optional[int] = None,
+        right_text: Optional[str] = None,
+        right_text_color: tuple = (0, 102, 255),
     ) -> None:
         """Render larger clock text centered on the matrix."""
         if self.matrix is None:
-            logger.info(f"Mock display clock: {text} (color: {color})")
+            if right_text:
+                logger.info(
+                    f"Mock display clock: {text} {right_text} "
+                    f"(color: {color}, right_text_color: {right_text_color})"
+                )
+            else:
+                logger.info(f"Mock display clock: {text} (color: {color})")
             return
 
         try:
@@ -272,22 +282,68 @@ class LEDScoreboard:
 
             resolved_font_size = font_size if font_size is not None else max(20, min(24, self.height))
             resolved_font_size = max(8, int(resolved_font_size))
-            try:
-                font = ImageFont.truetype(
-                    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", resolved_font_size
-                )
-            except OSError:
-                font = ImageFont.load_default()
 
-            bbox = draw.textbbox((0, 0), text, font=font)
-            text_width = bbox[2] - bbox[0]
-            text_height = bbox[3] - bbox[1]
-            x = ((self.width - text_width) // 2) - bbox[0]
-            y = ((self.height - text_height) // 2) - bbox[1]
+            def load_font(size: int) -> ImageFont.ImageFont:
+                try:
+                    return ImageFont.truetype(
+                        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                        max(8, int(size)),
+                    )
+                except OSError:
+                    return ImageFont.load_default()
 
-            draw.text((x, y), text, fill=color, font=font)
+            clock_font = load_font(resolved_font_size)
+            right_font_size = max(8, int(resolved_font_size * 0.52))
+            right_font = load_font(right_font_size)
+
+            clock_bbox = draw.textbbox((0, 0), text, font=clock_font)
+            clock_width = clock_bbox[2] - clock_bbox[0]
+            clock_height = clock_bbox[3] - clock_bbox[1]
+
+            right_text_value = str(right_text).strip() if right_text else ""
+            spacing = 3
+            right_width = 0
+            right_bbox = None
+            if right_text_value:
+                right_bbox = draw.textbbox((0, 0), right_text_value, font=right_font)
+                right_width = right_bbox[2] - right_bbox[0]
+
+            total_width = clock_width + (spacing + right_width if right_width > 0 else 0)
+            max_width = self.width - 2
+            while total_width > max_width and resolved_font_size > 8:
+                resolved_font_size -= 1
+                clock_font = load_font(resolved_font_size)
+                right_font = load_font(max(8, int(resolved_font_size * 0.52)))
+
+                clock_bbox = draw.textbbox((0, 0), text, font=clock_font)
+                clock_width = clock_bbox[2] - clock_bbox[0]
+                clock_height = clock_bbox[3] - clock_bbox[1]
+
+                if right_text_value:
+                    right_bbox = draw.textbbox((0, 0), right_text_value, font=right_font)
+                    right_width = right_bbox[2] - right_bbox[0]
+                else:
+                    right_width = 0
+                    right_bbox = None
+
+                total_width = clock_width + (spacing + right_width if right_width > 0 else 0)
+
+            clock_x = ((self.width - total_width) // 2) - clock_bbox[0]
+            clock_y = ((self.height - clock_height) // 2) - clock_bbox[1]
+
+            draw.text((clock_x, clock_y), text, fill=color, font=clock_font)
+
+            if right_text_value and right_bbox is not None:
+                right_height = right_bbox[3] - right_bbox[1]
+                right_x = clock_x + clock_width + spacing - right_bbox[0]
+                right_y = ((self.height - right_height) // 2) - right_bbox[1]
+                draw.text((right_x, right_y), right_text_value, fill=right_text_color, font=right_font)
+
             self.matrix.SetImage(image)
-            logger.debug(f"Rendered clock: {text}")
+            if right_text_value:
+                logger.debug(f"Rendered clock: {text} {right_text_value}")
+            else:
+                logger.debug(f"Rendered clock: {text}")
         except Exception as e:
             logger.error(f"Error rendering clock: {e}")
 

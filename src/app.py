@@ -4,6 +4,10 @@ import logging
 import signal
 import sys
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import json
 import yaml
 from typing import Dict, Any, Optional, Tuple
 
@@ -39,6 +43,8 @@ class ScoreboardApp:
         self.clock_format = str(clock_config.get("format", "%H:%M:%S"))
         self.clock_idle_after_seconds = float(clock_config.get("idle_after_seconds", 0))
         self.clock_font_size: Optional[int] = None
+        self.weather_temperature_text: Optional[str] = None
+        self.weather_next_fetch_time = 0.0
 
         raw_font_size = clock_config.get("font_size")
         if raw_font_size is not None:
@@ -56,6 +62,42 @@ class ScoreboardApp:
             self.clock_color: Tuple[int, int, int] = (int(color[0]), int(color[1]), int(color[2]))
         else:
             self.clock_color = (255, 255, 0)
+
+        weather_config = clock_config.get("weather") or {}
+        self.weather_enabled = bool(weather_config.get("enabled", True))
+
+        try:
+            self.weather_latitude = float(weather_config.get("latitude", 41.7056))
+            self.weather_longitude = float(weather_config.get("longitude", -86.2353))
+        except (TypeError, ValueError):
+            logger.warning("Invalid weather coordinates. Falling back to Notre Dame, IN.")
+            self.weather_latitude = 41.7056
+            self.weather_longitude = -86.2353
+
+        self.weather_unit = str(weather_config.get("unit", "F")).strip().upper()
+        if self.weather_unit not in {"F", "C"}:
+            logger.warning("Invalid weather.unit. Using Fahrenheit.")
+            self.weather_unit = "F"
+
+        weather_color = weather_config.get("color", [0, 102, 255])
+        if isinstance(weather_color, list) and len(weather_color) == 3:
+            self.weather_color: Tuple[int, int, int] = (
+                int(weather_color[0]),
+                int(weather_color[1]),
+                int(weather_color[2]),
+            )
+        else:
+            self.weather_color = (0, 102, 255)
+
+        try:
+            self.weather_refresh_seconds = max(60, int(weather_config.get("refresh_seconds", 600)))
+        except (TypeError, ValueError):
+            self.weather_refresh_seconds = 600
+
+        try:
+            self.weather_timeout_seconds = max(1.0, float(weather_config.get("timeout_seconds", 2.5)))
+        except (TypeError, ValueError):
+            self.weather_timeout_seconds = 2.5
 
         # Set up signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -168,12 +210,57 @@ class ScoreboardApp:
             return
 
         self.last_clock_second = current_second
+        self._maybe_refresh_weather(now)
         clock_text = time.strftime(self.clock_format, time.localtime(now))
         self.scoreboard.display_clock(
             clock_text,
             color=self.clock_color,
             font_size=self.clock_font_size,
+            right_text=self.weather_temperature_text,
+            right_text_color=self.weather_color,
         )
+
+    def _maybe_refresh_weather(self, now: float) -> None:
+        """Refresh cached weather data at the configured interval."""
+        if not self.weather_enabled:
+            return
+
+        if now < self.weather_next_fetch_time:
+            return
+
+        self.weather_next_fetch_time = now + self.weather_refresh_seconds
+
+        temperature = self._fetch_current_temperature()
+        if temperature is not None:
+            self.weather_temperature_text = temperature
+
+    def _fetch_current_temperature(self) -> Optional[str]:
+        """Fetch current temperature from Open-Meteo."""
+        params = {
+            "latitude": self.weather_latitude,
+            "longitude": self.weather_longitude,
+            "current": "temperature_2m",
+            "temperature_unit": "fahrenheit" if self.weather_unit == "F" else "celsius",
+            "timezone": "America/Indiana/Indianapolis",
+        }
+        url = f"https://api.open-meteo.com/v1/forecast?{urllib.parse.urlencode(params)}"
+
+        try:
+            with urllib.request.urlopen(url, timeout=self.weather_timeout_seconds) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+
+            current = payload.get("current") or {}
+            raw_temp = current.get("temperature_2m")
+            if raw_temp is None:
+                logger.warning("Weather response missing current.temperature_2m")
+                return None
+
+            rounded = int(round(float(raw_temp)))
+            return f"{rounded}{self.weather_unit}"
+
+        except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+            logger.warning(f"Unable to refresh weather temperature: {exc}")
+            return None
 
     def _signal_handler(self, signum, frame):
         """Handle termination signals"""
