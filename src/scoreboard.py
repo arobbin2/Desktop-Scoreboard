@@ -116,6 +116,7 @@ class LEDScoreboard:
         self.current_text = ""
         self.current_data: Dict[str, Any] = {}
         self.cubs_reference_template = self._load_cubs_reference_template()
+        self.base_state_assets = self._load_base_state_assets()
 
     def display_text(self, text: str, color: tuple = (255, 0, 0)) -> None:
         """
@@ -510,12 +511,14 @@ class LEDScoreboard:
             outs_text = f"{outs} OUTS"
 
             if "LOADED" in bases_text:
-                compact_bases = "1 2 3"
+                bases_key = "123"
             else:
                 on_first = "1B" in bases_text
                 on_second = "2B" in bases_text
                 on_third = "3B" in bases_text
-                compact_bases = ("1" if on_first else "-") + ("2" if on_second else "-") + ("3" if on_third else "-")
+                bases_key = ("1" if on_first else "-") + ("2" if on_second else "-") + ("3" if on_third else "-")
+
+            compact_bases = bases_key
 
             # Text colors chosen to sit on top of the provided Cubs template.
             yellow = (255, 222, 0)
@@ -552,7 +555,18 @@ class LEDScoreboard:
 
             # Center stack: bigger balls/strikes under inning, bases left, outs right.
             draw_centered(center_x, 12, bs_text, bs_font, white)
-            draw_centered(center_x - 54, 12, compact_bases, bases_font, white)
+            bases_asset = self.base_state_assets.get(bases_key)
+            if bases_asset is not None:
+                bases_icon = bases_asset
+                if bases_icon.size != (32, 32):
+                    bases_icon = bases_icon.resize((32, 32), Image.Resampling.LANCZOS)
+
+                # Position aligns with previous bases text area in the center-left stack.
+                bases_x = center_x - 70
+                bases_y = 0
+                image.paste(bases_icon, (bases_x, bases_y), bases_icon)
+            else:
+                draw_centered(center_x - 54, 12, compact_bases, bases_font, white)
             draw_centered(center_x + 48, 12, outs_text, outs_font, gray)
 
             self.matrix.SetImage(image)
@@ -561,7 +575,10 @@ class LEDScoreboard:
 
     def _load_cubs_reference_template(self) -> Optional[Image.Image]:
         """Load the user-provided Cubs PNG as an overlay template for baseball mode."""
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         candidates = [
+            os.path.join(repo_root, "Assets", "CUBS.png"),
+            os.path.join(repo_root, "Assets", "cubs.png"),
             "/workspaces/Desktop-Scoreboard/Assets/CUBS.png",
             "/workspaces/Desktop-Scoreboard/Assets/cubs.png",
         ]
@@ -578,6 +595,49 @@ class LEDScoreboard:
 
         logger.info("No Cubs reference template found; using code-drawn layout")
         return None
+
+    def _load_base_state_assets(self) -> Dict[str, Image.Image]:
+        """Load base occupancy PNGs keyed by `---`/`1--`/.../`123`."""
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        assets_dir_candidates = [
+            os.path.join(repo_root, "Assets"),
+            "/workspaces/Desktop-Scoreboard/Assets",
+        ]
+        loaded: Dict[str, Image.Image] = {}
+
+        pattern = re.compile(r"^([1-][2-][3-])\.png$", re.IGNORECASE)
+
+        for assets_dir in assets_dir_candidates:
+            if not os.path.isdir(assets_dir):
+                continue
+
+            try:
+                names = os.listdir(assets_dir)
+            except OSError as exc:
+                logger.warning(f"Unable to list assets directory '{assets_dir}': {exc}")
+                continue
+
+            for name in names:
+                match = pattern.match(name)
+                if not match:
+                    continue
+
+                key = match.group(1)
+                path = os.path.join(assets_dir, name)
+                try:
+                    loaded[key] = Image.open(path).convert("RGBA")
+                except Exception as exc:
+                    logger.warning(f"Unable to load base state asset '{path}': {exc}")
+
+            if loaded:
+                break
+
+        if loaded:
+            logger.info(f"Loaded {len(loaded)} base state asset(s)")
+        else:
+            logger.info("No base state assets found; using text fallback")
+
+        return loaded
 
     def _team_primary_color(self, team_abbreviation: str, fallback: tuple = (255, 255, 255)) -> tuple:
         """Return MLB team primary color for a team abbreviation."""
