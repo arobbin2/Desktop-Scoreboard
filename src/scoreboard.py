@@ -482,22 +482,11 @@ class LEDScoreboard:
                 on_third = "3B" in bases_text
                 compact_bases = ("1" if on_first else "-") + ("2" if on_second else "-") + ("3" if on_third else "-")
 
-            compact_status = status_text
-            if "IN PROGRESS" in compact_status:
-                compact_status = "LIVE"
-            if "FINAL" in compact_status:
-                compact_status = "FINAL"
-            if "PRE-GAME" in compact_status or "SCHEDULED" in compact_status:
-                compact_status = "PREGAME"
-
-            is_live = compact_status in {"LIVE", "IN PROGRESS"}
-
             # Text colors chosen to sit on top of the provided Cubs template.
             yellow = (255, 222, 0)
             cubs_blue = (0, 90, 255)
             rangers_red = (255, 0, 0)
             white = (255, 255, 255)
-            gray = (170, 170, 170)
 
             away_team_color = cubs_blue if away_team == "CHC" else (rangers_red if away_team == "TEX" else white)
             home_team_color = cubs_blue if home_team == "CHC" else (rangers_red if home_team == "TEX" else white)
@@ -511,10 +500,9 @@ class LEDScoreboard:
             )
             score_font = fit_font("88", 56, max_size=16, min_size=12, bold=True)
             inning_font = fit_font(inning_text or "TOP 9", 136, max_size=12, min_size=9, bold=True)
-            bs_font = fit_font(bs_text, 88, max_size=14, min_size=10, bold=True)
+            bs_font = fit_font(bs_text, 104, max_size=20, min_size=13, bold=True)
             bases_font = fit_font(compact_bases, 64, max_size=11, min_size=8, bold=True)
             outs_font = fit_font(outs_text, 64, max_size=11, min_size=8, bold=True)
-            status_font = fit_font(compact_status or "LIVE", 136, max_size=10, min_size=8, bold=True)
 
             away_x = 29
             home_x = self.width - 29
@@ -531,7 +519,6 @@ class LEDScoreboard:
             draw_centered(center_x, 12, bs_text, bs_font, white)
             draw_centered(center_x - 48, 12, compact_bases, bases_font, white)
             draw_centered(center_x + 48, 12, outs_text, outs_font, rangers_red)
-            draw_centered(center_x, 25, compact_status, status_font, (0, 255, 0) if is_live else gray)
 
             self.matrix.SetImage(image)
         except Exception as e:
