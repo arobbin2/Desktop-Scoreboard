@@ -651,6 +651,7 @@ class LEDScoreboard:
     def _candidate_assets_dirs(self) -> List[str]:
         """Return candidate directories to locate static image assets."""
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        cwd_root = os.getcwd()
         candidates = []
 
         if self.assets_dir:
@@ -663,9 +664,17 @@ class LEDScoreboard:
         candidates.extend(
             [
                 os.path.join(repo_root, "Assets"),
-                os.path.join(os.getcwd(), "Assets"),
+                os.path.join(repo_root, "asset"),
+                os.path.join(repo_root, "assets"),
+                os.path.join(cwd_root, "Assets"),
+                os.path.join(cwd_root, "asset"),
+                os.path.join(cwd_root, "assets"),
                 "/home/techserv/Desktop-Scoreboard/Assets",
+                "/home/techserv/Desktop-Scoreboard/asset",
+                "/home/techserv/Desktop-Scoreboard/assets",
                 "/workspaces/Desktop-Scoreboard/Assets",
+                "/workspaces/Desktop-Scoreboard/asset",
+                "/workspaces/Desktop-Scoreboard/assets",
             ]
         )
 
