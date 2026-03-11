@@ -458,10 +458,10 @@ class LEDScoreboard:
                 template = self.cubs_reference_template
                 if template.size != (self.width, self.height):
                     template = template.resize((self.width, self.height), Image.Resampling.LANCZOS)
-                image = Image.new("RGB", (self.width, self.height), color=(43, 76, 56))
+                image = Image.new("RGB", (self.width, self.height), color=(0, 0, 0))
                 image.paste(template, (0, 0), template)
             else:
-                image = Image.new("RGB", (self.width, self.height), color=(43, 76, 56))
+                image = Image.new("RGB", (self.width, self.height), color=(0, 0, 0))
             draw = ImageDraw.Draw(image)
 
             def load_font(size: int, bold: bool = False) -> ImageFont.ImageFont:
