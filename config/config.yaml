@@ -62,7 +62,7 @@ rss:
   timeout_seconds: 4.0
   scroll_step: 1
   frame_interval_seconds: 0.005
-  scroll_pixels_per_second: 400  # Explicit speed target; higher is faster
+  scroll_pixels_per_second: 100  # Explicit speed target; higher is faster
   ticker_gap: 24
   color: [255, 255, 255]
   font_size: 20
