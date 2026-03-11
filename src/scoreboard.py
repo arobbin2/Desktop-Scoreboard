@@ -487,6 +487,7 @@ class LEDScoreboard:
             cubs_blue = (0, 90, 255)
             rangers_red = (255, 0, 0)
             white = (255, 255, 255)
+            gray = (170, 170, 170)
 
             away_team_color = cubs_blue if away_team == "CHC" else (rangers_red if away_team == "TEX" else white)
             home_team_color = cubs_blue if home_team == "CHC" else (rangers_red if home_team == "TEX" else white)
