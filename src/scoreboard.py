@@ -494,12 +494,12 @@ class LEDScoreboard:
             team_font = fit_font(
                 away_team if len(away_team) >= len(home_team) else home_team,
                 56,
-                max_size=10,
+                max_size=15,
                 min_size=8,
                 bold=True,
             )
-            score_font = fit_font("88", 56, max_size=16, min_size=12, bold=True)
-            inning_font = fit_font(inning_text or "TOP 9", 136, max_size=12, min_size=9, bold=True)
+            score_font = fit_font("88", 56, max_size=20, min_size=12, bold=True)
+            inning_font = fit_font(inning_text or "TOP OF 9th", 136, max_size=12, min_size=9, bold=True)
             bs_font = fit_font(bs_text, 104, max_size=20, min_size=13, bold=True)
             bases_font = fit_font(compact_bases, 64, max_size=15, min_size=12, bold=True)
             outs_font = fit_font(outs_text, 64, max_size=15, min_size=12, bold=True)
