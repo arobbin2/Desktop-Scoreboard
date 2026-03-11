@@ -1,6 +1,7 @@
 """Main scoreboard controller for LED matrix display"""
 
 import logging
+import os
 import re
 from typing import Optional, Dict, Any
 from PIL import Image, ImageDraw, ImageFont
@@ -81,6 +82,13 @@ class LEDScoreboard:
         # Current display state
         self.current_text = ""
         self.current_data: Dict[str, Any] = {}
+        self.cubs_logo = self._load_optional_logo(
+            [
+                "/workspaces/Desktop-Scoreboard/Assets/CUBS.png",
+                "/workspaces/Desktop-Scoreboard/Assets/cubs.png",
+            ],
+            max_size=(26, 18),
+        )
 
     def display_text(self, text: str, color: tuple = (255, 0, 0)) -> None:
         """
@@ -504,6 +512,11 @@ class LEDScoreboard:
             draw_centered(away_x, int(self.height * 0.42), away_score, score_font, (255, 255, 255))
             draw_centered(home_x, int(self.height * 0.42), home_score, score_font, (255, 255, 255))
 
+            if self.cubs_logo is not None:
+                logo_x = center_x - (self.cubs_logo.width // 2)
+                logo_y = max(10, int(self.height * 0.34) - self.cubs_logo.height - 1)
+                image.paste(self.cubs_logo, (logo_x, logo_y), self.cubs_logo)
+
             draw_centered(center_x, 1, inning_text or "-", inning_font, (0, 255, 255))
             draw_centered(center_x, int(self.height * 0.34), compact_count, count_font, (255, 255, 255))
             draw_centered(center_x, int(self.height * 0.62), compact_bases, bases_font, (255, 128, 0))
@@ -518,6 +531,20 @@ class LEDScoreboard:
             self.matrix.SetImage(image)
         except Exception as e:
             logger.error(f"Error rendering baseball game: {e}")
+
+    def _load_optional_logo(self, candidate_paths: list, max_size: tuple) -> Optional[Image.Image]:
+        """Load and resize a transparent PNG logo when present."""
+        for path in candidate_paths:
+            if not os.path.exists(path):
+                continue
+            try:
+                logo = Image.open(path).convert("RGBA")
+                logo.thumbnail(max_size, Image.Resampling.LANCZOS)
+                logger.info(f"Loaded logo asset: {path}")
+                return logo
+            except Exception as exc:
+                logger.warning(f"Unable to load logo asset '{path}': {exc}")
+        return None
 
     def clear(self) -> None:
         """Clear the display"""
