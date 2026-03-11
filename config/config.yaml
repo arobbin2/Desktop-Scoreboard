@@ -62,7 +62,7 @@ rss:
   timeout_seconds: 4.0
   scroll_step: 1
   frame_interval_seconds: 0.01
-  scroll_pixels_per_second: 50  # Explicit speed target; higher is faster
+  scroll_pixels_per_second: 200  # Explicit speed target; higher is faster
   max_elapsed_factor: 2.0  # Caps catch-up jumps if the process is briefly delayed
   ticker_gap: 24
   color: [255, 255, 255]
