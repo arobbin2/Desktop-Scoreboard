@@ -666,6 +666,7 @@ class LEDScoreboard:
     def _candidate_assets_dirs(self) -> List[str]:
         """Return candidate directories to locate static image assets."""
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        module_dir = os.path.abspath(os.path.dirname(__file__))
         cwd_root = os.getcwd()
         candidates = []
 
@@ -681,6 +682,9 @@ class LEDScoreboard:
                 os.path.join(repo_root, "Assets"),
                 os.path.join(repo_root, "asset"),
                 os.path.join(repo_root, "assets"),
+                os.path.join(module_dir, "Assets"),
+                os.path.join(module_dir, "asset"),
+                os.path.join(module_dir, "assets"),
                 os.path.join(cwd_root, "Assets"),
                 os.path.join(cwd_root, "asset"),
                 os.path.join(cwd_root, "assets"),
