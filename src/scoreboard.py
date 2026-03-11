@@ -561,8 +561,9 @@ class LEDScoreboard:
                 if bases_icon.size != (32, 32):
                     bases_icon = bases_icon.resize((32, 32), Image.Resampling.LANCZOS)
 
-                # Position aligns with previous bases text area in the center-left stack.
-                bases_x = center_x - 70
+                # Keep icon in the center-left stack and clamp for smaller panel widths.
+                bases_x = center_x - int(self.width * 0.27)
+                bases_x = max(0, min(self.width - bases_icon.width, bases_x))
                 bases_y = 0
                 image.paste(bases_icon, (bases_x, bases_y), bases_icon)
             else:
