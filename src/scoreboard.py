@@ -3,7 +3,7 @@
 import logging
 import os
 import re
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from PIL import Image, ImageDraw, ImageFont
 
 try:
@@ -63,6 +63,7 @@ class LEDScoreboard:
         parallel: int = 1,
         led_rgb_sequence: str = "RGB",
         title_text: str = "COMPTON",
+        assets_dir: Optional[str] = None,
     ):
         """
         Initialize LED matrix scoreboard
@@ -76,12 +77,15 @@ class LEDScoreboard:
             chain_length: Number of chained matrices horizontally
             parallel: Number of parallel matrices
             title_text: Header text shown above the center clock in data mode
+            assets_dir: Optional directory containing display assets (CUBS/base PNGs)
         """
         self.width = width * chain_length
         self.height = height * parallel
         self.brightness = brightness
         resolved_title = str(title_text).strip()
         self.title_text = resolved_title if resolved_title else "COMPTON"
+        resolved_assets_dir = str(assets_dir).strip() if assets_dir is not None else ""
+        self.assets_dir = resolved_assets_dir or None
         self.matrix = None
         sequence = str(led_rgb_sequence).upper()
         if sorted(sequence) != ["B", "G", "R"]:
@@ -115,6 +119,7 @@ class LEDScoreboard:
         # Current display state
         self.current_text = ""
         self.current_data: Dict[str, Any] = {}
+        self._missing_base_asset_keys_logged = set()
         self.cubs_reference_template = self._load_cubs_reference_template()
         self.base_state_assets = self._load_base_state_assets()
 
@@ -567,6 +572,12 @@ class LEDScoreboard:
                 bases_y = 0
                 image.paste(bases_icon, (bases_x, bases_y), bases_icon)
             else:
+                if bases_key not in self._missing_base_asset_keys_logged:
+                    logger.info(
+                        f"No base asset for key '{bases_key}'. "
+                        f"Loaded keys: {sorted(self.base_state_assets.keys())}"
+                    )
+                    self._missing_base_asset_keys_logged.add(bases_key)
                 draw_centered(center_x - 54, 12, compact_bases, bases_font, white)
             draw_centered(center_x + 48, 12, outs_text, outs_font, gray)
 
@@ -576,13 +587,8 @@ class LEDScoreboard:
 
     def _load_cubs_reference_template(self) -> Optional[Image.Image]:
         """Load the user-provided Cubs PNG as an overlay template for baseball mode."""
-        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        candidates = [
-            os.path.join(repo_root, "Assets", "CUBS.png"),
-            os.path.join(repo_root, "Assets", "cubs.png"),
-            "/workspaces/Desktop-Scoreboard/Assets/CUBS.png",
-            "/workspaces/Desktop-Scoreboard/Assets/cubs.png",
-        ]
+        candidates = [os.path.join(path, "CUBS.png") for path in self._candidate_assets_dirs()]
+        candidates += [os.path.join(path, "cubs.png") for path in self._candidate_assets_dirs()]
 
         for path in candidates:
             if not os.path.exists(path):
@@ -599,11 +605,7 @@ class LEDScoreboard:
 
     def _load_base_state_assets(self) -> Dict[str, Image.Image]:
         """Load base occupancy PNGs keyed by `---`/`1--`/.../`123`."""
-        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        assets_dir_candidates = [
-            os.path.join(repo_root, "Assets"),
-            "/workspaces/Desktop-Scoreboard/Assets",
-        ]
+        assets_dir_candidates = self._candidate_assets_dirs()
         loaded: Dict[str, Image.Image] = {}
 
         pattern = re.compile(r"^([1-][2-][3-])\.png$", re.IGNORECASE)
@@ -634,11 +636,50 @@ class LEDScoreboard:
                 break
 
         if loaded:
-            logger.info(f"Loaded {len(loaded)} base state asset(s)")
+            logger.info(
+                f"Loaded {len(loaded)} base state asset(s) "
+                f"from '{next((d for d in assets_dir_candidates if os.path.isdir(d)), 'unknown')}'"
+            )
         else:
-            logger.info("No base state assets found; using text fallback")
+            logger.info(
+                "No base state assets found; using text fallback. "
+                f"Searched: {assets_dir_candidates}"
+            )
 
         return loaded
+
+    def _candidate_assets_dirs(self) -> List[str]:
+        """Return candidate directories to locate static image assets."""
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        candidates = []
+
+        if self.assets_dir:
+            candidates.append(os.path.abspath(self.assets_dir))
+
+        env_assets = os.environ.get("SCOREBOARD_ASSETS_DIR", "").strip()
+        if env_assets:
+            candidates.append(os.path.abspath(env_assets))
+
+        candidates.extend(
+            [
+                os.path.join(repo_root, "Assets"),
+                os.path.join(os.getcwd(), "Assets"),
+                "/home/techserv/Desktop-Scoreboard/Assets",
+                "/workspaces/Desktop-Scoreboard/Assets",
+            ]
+        )
+
+        # Preserve order while removing duplicates.
+        deduped = []
+        seen = set()
+        for item in candidates:
+            key = os.path.normpath(item)
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(item)
+
+        return deduped
 
     def _team_primary_color(self, team_abbreviation: str, fallback: tuple = (255, 255, 255)) -> tuple:
         """Return MLB team primary color for a team abbreviation."""

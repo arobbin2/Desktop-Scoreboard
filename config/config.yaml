@@ -21,6 +21,7 @@ matrix:
   hardware_mapping: regular  # Regular GPIO mapping
   chain_length: 4
   parallel: 1
+  assets_dir: /home/techserv/Desktop-Scoreboard/Assets  # Explicit path for Cubs/base PNG assets
   led_rgb_sequence: RBG
   title_text: PURCELL  # Header above center clock in scoreboard data view
 
