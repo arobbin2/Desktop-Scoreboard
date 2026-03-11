@@ -456,6 +456,32 @@ class LEDScoreboard:
             bases_text = str(data.get("bases_text", "BASES: ---")).upper()[:16]
             status_text = str(data.get("status_text", "")).upper()[:18]
 
+            balls_match = re.search(r"B\s*(\d)", count_text)
+            strikes_match = re.search(r"S\s*(\d)", count_text)
+            outs_match = re.search(r"O\s*(\d)", count_text)
+            balls = balls_match.group(1) if balls_match else "0"
+            strikes = strikes_match.group(1) if strikes_match else "0"
+            outs = outs_match.group(1) if outs_match else "0"
+            compact_count = f"{balls}-{strikes}  {outs} OUT"
+
+            if "LOADED" in bases_text:
+                compact_bases = "ON: 1 2 3"
+            else:
+                on_first = "1B" in bases_text
+                on_second = "2B" in bases_text
+                on_third = "3B" in bases_text
+                compact_bases = "ON: " + ("1" if on_first else "-") + ("2" if on_second else "-") + ("3" if on_third else "-")
+
+            compact_status = status_text
+            if "IN PROGRESS" in compact_status:
+                compact_status = "LIVE"
+            if "FINAL" in compact_status:
+                compact_status = "FINAL"
+            if "PRE-GAME" in compact_status or "SCHEDULED" in compact_status:
+                compact_status = "PREGAME"
+
+            is_live = compact_status in {"LIVE", "IN PROGRESS"}
+
             team_font = fit_font(
                 away_team if len(away_team) >= len(home_team) else home_team,
                 int(self.width * 0.14),
@@ -464,9 +490,10 @@ class LEDScoreboard:
                 bold=True,
             )
             score_font = fit_font("88", int(self.width * 0.12), max(14, int(self.height * 0.56)), min_size=10, bold=True)
-            inning_font = fit_font(inning_text or "TOP 9", int(self.width * 0.28), max(11, int(self.height * 0.4)), min_size=8, bold=True)
-            info_font = fit_font(count_text if len(count_text) >= len(bases_text) else bases_text, int(self.width * 0.55), max(10, int(self.height * 0.34)), min_size=8, bold=False)
-            status_font = fit_font(status_text or "LIVE", int(self.width * 0.55), max(10, int(self.height * 0.34)), min_size=8, bold=False)
+            inning_font = fit_font(inning_text or "TOP 9", int(self.width * 0.44), max(13, int(self.height * 0.44)), min_size=9, bold=True)
+            count_font = fit_font(compact_count, int(self.width * 0.44), max(12, int(self.height * 0.42)), min_size=9, bold=True)
+            bases_font = fit_font(compact_bases, int(self.width * 0.44), max(11, int(self.height * 0.36)), min_size=8, bold=True)
+            status_font = fit_font(compact_status or "LIVE", int(self.width * 0.44), max(11, int(self.height * 0.36)), min_size=8, bold=True)
 
             away_x = int(self.width * 0.08)
             home_x = int(self.width * 0.92)
@@ -478,9 +505,15 @@ class LEDScoreboard:
             draw_centered(home_x, int(self.height * 0.42), home_score, score_font, (255, 255, 255))
 
             draw_centered(center_x, 1, inning_text or "-", inning_font, (0, 255, 255))
-            draw_centered(center_x, int(self.height * 0.36), count_text, info_font, (255, 255, 255))
-            draw_centered(center_x, int(self.height * 0.62), bases_text, info_font, (255, 128, 0))
-            draw_centered(center_x, int(self.height * 0.8), status_text, status_font, (0, 255, 0))
+            draw_centered(center_x, int(self.height * 0.34), compact_count, count_font, (255, 255, 255))
+            draw_centered(center_x, int(self.height * 0.62), compact_bases, bases_font, (255, 128, 0))
+            draw_centered(
+                center_x,
+                int(self.height * 0.82),
+                compact_status,
+                status_font,
+                (0, 255, 0) if is_live else (180, 180, 180),
+            )
 
             self.matrix.SetImage(image)
         except Exception as e:
