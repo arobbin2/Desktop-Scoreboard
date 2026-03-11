@@ -1,7 +1,6 @@
 """Main scoreboard controller for LED matrix display"""
 
 import logging
-import os
 import re
 from typing import Optional, Dict, Any
 from PIL import Image, ImageDraw, ImageFont
@@ -82,19 +81,6 @@ class LEDScoreboard:
         # Current display state
         self.current_text = ""
         self.current_data: Dict[str, Any] = {}
-        self.cubs_template = self._load_optional_template(
-            [
-                "/workspaces/Desktop-Scoreboard/Assets/CUBS.png",
-                "/workspaces/Desktop-Scoreboard/Assets/cubs.png",
-            ]
-        )
-        self.cubs_logo = self._load_optional_logo(
-            [
-                "/workspaces/Desktop-Scoreboard/Assets/CUBS.png",
-                "/workspaces/Desktop-Scoreboard/Assets/cubs.png",
-            ],
-            max_size=(26, 18),
-        )
 
     def display_text(self, text: str, color: tuple = (255, 0, 0)) -> None:
         """
@@ -433,19 +419,7 @@ class LEDScoreboard:
             return
 
         try:
-            if self.cubs_template is not None:
-                if self.cubs_template.size == (self.width, self.height):
-                    template_image = self.cubs_template.copy()
-                else:
-                    template_image = self.cubs_template.resize(
-                        (self.width, self.height),
-                        Image.Resampling.LANCZOS,
-                    )
-
-                image = Image.new("RGB", (self.width, self.height), color=(0, 0, 0))
-                image.paste(template_image, (0, 0), template_image)
-            else:
-                image = Image.new("RGB", (self.width, self.height), color=(0, 0, 0))
+            image = Image.new("RGB", (self.width, self.height), color=(0, 0, 0))
             draw = ImageDraw.Draw(image)
 
             def load_font(size: int, bold: bool = False) -> ImageFont.ImageFont:
@@ -508,74 +482,60 @@ class LEDScoreboard:
 
             is_live = compact_status in {"LIVE", "IN PROGRESS"}
 
+            # Reference-inspired palette (from uploaded Cubs artwork): deep blue, red, gold.
+            bg = (0, 0, 0)
+            navy = (0, 52, 156)
+            navy_dim = (0, 40, 125)
+            red = (209, 0, 0)
+            gold = (255, 222, 0)
+            white = (255, 255, 255)
+            gray = (170, 170, 170)
+
+            draw.rectangle((0, 0, self.width - 1, self.height - 1), fill=bg)
+            draw.rectangle((0, 0, self.width - 1, 9), fill=navy)
+
+            left_box = (0, 10, 57, self.height - 1)
+            center_box = (58, 10, self.width - 59, self.height - 1)
+            right_box = (self.width - 58, 10, self.width - 1, self.height - 1)
+            draw.rectangle(left_box, fill=red)
+            draw.rectangle(right_box, fill=red)
+            draw.rectangle(center_box, fill=navy_dim)
+
+            draw.line((58, 10, 58, self.height - 1), fill=gold)
+            draw.line((self.width - 59, 10, self.width - 59, self.height - 1), fill=gold)
+            draw.rectangle((0, 0, self.width - 1, self.height - 1), outline=gold)
+
             team_font = fit_font(
                 away_team if len(away_team) >= len(home_team) else home_team,
-                int(self.width * 0.14),
-                max(10, int(self.height * 0.36)),
+                56,
+                max_size=10,
                 min_size=8,
                 bold=True,
             )
-            score_font = fit_font("88", int(self.width * 0.12), max(14, int(self.height * 0.56)), min_size=10, bold=True)
-            inning_font = fit_font(inning_text or "TOP 9", int(self.width * 0.44), max(13, int(self.height * 0.44)), min_size=9, bold=True)
-            count_font = fit_font(compact_count, int(self.width * 0.44), max(12, int(self.height * 0.42)), min_size=9, bold=True)
-            bases_font = fit_font(compact_bases, int(self.width * 0.44), max(11, int(self.height * 0.36)), min_size=8, bold=True)
-            status_font = fit_font(compact_status or "LIVE", int(self.width * 0.44), max(11, int(self.height * 0.36)), min_size=8, bold=True)
+            score_font = fit_font("88", 56, max_size=16, min_size=12, bold=True)
+            inning_font = fit_font(inning_text or "TOP 9", 136, max_size=12, min_size=9, bold=True)
+            count_font = fit_font(compact_count, 136, max_size=11, min_size=8, bold=True)
+            bases_font = fit_font(compact_bases, 136, max_size=10, min_size=8, bold=True)
+            status_font = fit_font(compact_status or "LIVE", 136, max_size=10, min_size=8, bold=True)
 
-            away_x = int(self.width * 0.08)
-            home_x = int(self.width * 0.92)
+            away_x = 29
+            home_x = self.width - 29
             center_x = self.width // 2
 
-            draw_centered(away_x, 1, away_team, team_font, (255, 255, 0))
-            draw_centered(home_x, 1, home_team, team_font, (255, 255, 0))
-            draw_centered(away_x, int(self.height * 0.42), away_score, score_font, (255, 255, 255))
-            draw_centered(home_x, int(self.height * 0.42), home_score, score_font, (255, 255, 255))
+            draw_centered(away_x, 1, away_team, team_font, gold)
+            draw_centered(home_x, 1, home_team, team_font, gold)
+            draw_centered(center_x, 1, inning_text or "-", inning_font, white)
 
-            if self.cubs_template is None and self.cubs_logo is not None:
-                logo_x = center_x - (self.cubs_logo.width // 2)
-                logo_y = max(10, int(self.height * 0.34) - self.cubs_logo.height - 1)
-                image.paste(self.cubs_logo, (logo_x, logo_y), self.cubs_logo)
+            draw_centered(away_x, 14, away_score, score_font, white)
+            draw_centered(home_x, 14, home_score, score_font, white)
 
-            draw_centered(center_x, 1, inning_text or "-", inning_font, (0, 255, 255))
-            draw_centered(center_x, int(self.height * 0.34), compact_count, count_font, (255, 255, 255))
-            draw_centered(center_x, int(self.height * 0.62), compact_bases, bases_font, (255, 128, 0))
-            draw_centered(
-                center_x,
-                int(self.height * 0.82),
-                compact_status,
-                status_font,
-                (0, 255, 0) if is_live else (180, 180, 180),
-            )
+            draw_centered(center_x, 12, compact_count, count_font, white)
+            draw_centered(center_x, 19, compact_bases, bases_font, gold)
+            draw_centered(center_x, 25, compact_status, status_font, (0, 255, 0) if is_live else gray)
 
             self.matrix.SetImage(image)
         except Exception as e:
             logger.error(f"Error rendering baseball game: {e}")
-
-    def _load_optional_logo(self, candidate_paths: list, max_size: tuple) -> Optional[Image.Image]:
-        """Load and resize a transparent PNG logo when present."""
-        for path in candidate_paths:
-            if not os.path.exists(path):
-                continue
-            try:
-                logo = Image.open(path).convert("RGBA")
-                logo.thumbnail(max_size, Image.Resampling.LANCZOS)
-                logger.info(f"Loaded logo asset: {path}")
-                return logo
-            except Exception as exc:
-                logger.warning(f"Unable to load logo asset '{path}': {exc}")
-        return None
-
-    def _load_optional_template(self, candidate_paths: list) -> Optional[Image.Image]:
-        """Load full-size transparent PNG template for baseball mode background."""
-        for path in candidate_paths:
-            if not os.path.exists(path):
-                continue
-            try:
-                template = Image.open(path).convert("RGBA")
-                logger.info(f"Loaded baseball template asset: {path}")
-                return template
-            except Exception as exc:
-                logger.warning(f"Unable to load template asset '{path}': {exc}")
-        return None
 
     def clear(self) -> None:
         """Clear the display"""
