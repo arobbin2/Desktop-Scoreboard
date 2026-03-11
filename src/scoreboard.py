@@ -491,6 +491,8 @@ class LEDScoreboard:
 
             away_team = str(data.get("away_team", "AWAY")).upper()[:4]
             home_team = str(data.get("home_team", "HOME")).upper()[:4]
+            away_team_label = "CUBS" if away_team == "CHC" else away_team
+            home_team_label = "CUBS" if home_team == "CHC" else home_team
             away_score = str(data.get("away_score", "-"))[:2]
             home_score = str(data.get("home_score", "-"))[:2]
             inning_text = str(data.get("inning_text", "-")).upper()[:10]
@@ -505,7 +507,7 @@ class LEDScoreboard:
             strikes = strikes_match.group(1) if strikes_match else "0"
             outs = outs_match.group(1) if outs_match else "0"
             bs_text = f"{balls}-{strikes}"
-            outs_text = f"{outs} OUT"
+            outs_text = f"{outs} OUTS"
 
             if "LOADED" in bases_text:
                 compact_bases = "1 2 3"
@@ -519,13 +521,13 @@ class LEDScoreboard:
             yellow = (255, 222, 0)
             rangers_red = (255, 0, 0)
             white = (255, 255, 255)
-            gray = (170, 170, 170)
+            gray = (170, 0, 0)
 
             away_team_color = self._team_primary_color(away_team, fallback=white)
             home_team_color = self._team_primary_color(home_team, fallback=white)
 
             team_font = fit_font(
-                away_team if len(away_team) >= len(home_team) else home_team,
+                away_team_label if len(away_team_label) >= len(home_team_label) else home_team_label,
                 56,
                 max_size=15,
                 min_size=8,
@@ -541,8 +543,8 @@ class LEDScoreboard:
             home_x = self.width - 29
             center_x = self.width // 2
 
-            draw_centered(away_x, 1, away_team, team_font, away_team_color)
-            draw_centered(home_x, 1, home_team, team_font, home_team_color)
+            draw_centered(away_x, 1, away_team_label, team_font, away_team_color)
+            draw_centered(home_x, 1, home_team_label, team_font, home_team_color)
             draw_centered(center_x, 1, inning_text or "-", inning_font, yellow)
 
             draw_centered(away_x, 14, away_score, score_font, white)
