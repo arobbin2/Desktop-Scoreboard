@@ -1,6 +1,7 @@
 """Main scoreboard controller for LED matrix display"""
 
 import logging
+import os
 import re
 from typing import Optional, Dict, Any
 from PIL import Image, ImageDraw, ImageFont
@@ -81,6 +82,7 @@ class LEDScoreboard:
         # Current display state
         self.current_text = ""
         self.current_data: Dict[str, Any] = {}
+        self.cubs_reference_template = self._load_cubs_reference_template()
 
     def display_text(self, text: str, color: tuple = (255, 0, 0)) -> None:
         """
@@ -419,7 +421,14 @@ class LEDScoreboard:
             return
 
         try:
-            image = Image.new("RGB", (self.width, self.height), color=(0, 0, 0))
+            if self.cubs_reference_template is not None:
+                template = self.cubs_reference_template
+                if template.size != (self.width, self.height):
+                    template = template.resize((self.width, self.height), Image.Resampling.LANCZOS)
+                image = Image.new("RGB", (self.width, self.height), color=(0, 0, 0))
+                image.paste(template, (0, 0), template)
+            else:
+                image = Image.new("RGB", (self.width, self.height), color=(0, 0, 0))
             draw = ImageDraw.Draw(image)
 
             def load_font(size: int, bold: bool = False) -> ImageFont.ImageFont:
@@ -482,28 +491,10 @@ class LEDScoreboard:
 
             is_live = compact_status in {"LIVE", "IN PROGRESS"}
 
-            # Reference-inspired palette (from uploaded Cubs artwork): deep blue, red, gold.
-            bg = (0, 0, 0)
-            navy = (0, 52, 156)
-            navy_dim = (0, 40, 125)
-            red = (209, 0, 0)
+            # Text colors chosen to sit on top of the provided Cubs template.
             gold = (255, 222, 0)
             white = (255, 255, 255)
             gray = (170, 170, 170)
-
-            draw.rectangle((0, 0, self.width - 1, self.height - 1), fill=bg)
-            draw.rectangle((0, 0, self.width - 1, 9), fill=navy)
-
-            left_box = (0, 10, 57, self.height - 1)
-            center_box = (58, 10, self.width - 59, self.height - 1)
-            right_box = (self.width - 58, 10, self.width - 1, self.height - 1)
-            draw.rectangle(left_box, fill=red)
-            draw.rectangle(right_box, fill=red)
-            draw.rectangle(center_box, fill=navy_dim)
-
-            draw.line((58, 10, 58, self.height - 1), fill=gold)
-            draw.line((self.width - 59, 10, self.width - 59, self.height - 1), fill=gold)
-            draw.rectangle((0, 0, self.width - 1, self.height - 1), outline=gold)
 
             team_font = fit_font(
                 away_team if len(away_team) >= len(home_team) else home_team,
@@ -536,6 +527,26 @@ class LEDScoreboard:
             self.matrix.SetImage(image)
         except Exception as e:
             logger.error(f"Error rendering baseball game: {e}")
+
+    def _load_cubs_reference_template(self) -> Optional[Image.Image]:
+        """Load the user-provided Cubs PNG as an overlay template for baseball mode."""
+        candidates = [
+            "/workspaces/Desktop-Scoreboard/Assets/CUBS.png",
+            "/workspaces/Desktop-Scoreboard/Assets/cubs.png",
+        ]
+
+        for path in candidates:
+            if not os.path.exists(path):
+                continue
+            try:
+                template = Image.open(path).convert("RGBA")
+                logger.info(f"Loaded Cubs reference template: {path}")
+                return template
+            except Exception as exc:
+                logger.warning(f"Unable to load Cubs reference template '{path}': {exc}")
+
+        logger.info("No Cubs reference template found; using code-drawn layout")
+        return None
 
     def clear(self) -> None:
         """Clear the display"""
