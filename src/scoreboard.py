@@ -553,7 +553,7 @@ class LEDScoreboard:
             # Center stack: bigger balls/strikes under inning, bases left, outs right.
             draw_centered(center_x, 12, bs_text, bs_font, white)
             draw_centered(center_x - 54, 12, compact_bases, bases_font, white)
-            draw_centered(center_x + 54, 12, outs_text, outs_font, gray)
+            draw_centered(center_x + 44, 12, outs_text, outs_font, gray)
 
             self.matrix.SetImage(image)
         except Exception as e:
