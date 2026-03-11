@@ -120,6 +120,7 @@ class LEDScoreboard:
         self.current_text = ""
         self.current_data: Dict[str, Any] = {}
         self._missing_base_asset_keys_logged = set()
+        logger.info(f"Scoreboard module loaded from: {os.path.abspath(__file__)}")
         self.cubs_reference_template = self._load_cubs_reference_template()
         self.base_state_assets = self._load_base_state_assets()
 
@@ -619,7 +620,18 @@ class LEDScoreboard:
         }
 
         for assets_dir in assets_dir_candidates:
+            exists = os.path.exists(assets_dir)
+            is_dir = os.path.isdir(assets_dir)
+            logger.info(f"Asset dir candidate '{assets_dir}': exists={exists} isdir={is_dir}")
+
             if not os.path.isdir(assets_dir):
+                continue
+
+            try:
+                sample_names = sorted(os.listdir(assets_dir))[:12]
+                logger.info(f"Asset dir sample '{assets_dir}': {sample_names}")
+            except OSError as exc:
+                logger.warning(f"Unable to list assets directory '{assets_dir}': {exc}")
                 continue
 
             dir_loaded_count = 0
