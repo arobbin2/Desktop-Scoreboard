@@ -33,6 +33,7 @@ display:
 app:
   log_level: INFO
   mock_hardware: false  # Set to true to test without hardware
+  main_loop_sleep_seconds: 0.005  # Lower for faster animation updates
 
 # Mode Management
 modes:

@@ -42,6 +42,13 @@ class ScoreboardApp:
         self.last_clock_second: Optional[int] = None
         self.active_mode = "scoreboard"
 
+        app_config = self.config.get("app") or {}
+        self.main_loop_sleep_seconds = self._as_float(
+            app_config.get("main_loop_sleep_seconds"),
+            fallback=0.005,
+            minimum=0.001,
+        )
+
         clock_config = self.config.get("clock") or {}
         self.clock_enabled = bool(clock_config.get("enabled", False))
         self.clock_format = str(clock_config.get("format", "%H:%M:%S"))
@@ -206,7 +213,7 @@ class ScoreboardApp:
             # Keep the application running
             while self.running:
                 self._tick_active_mode()
-                time.sleep(0.05)
+                time.sleep(self.main_loop_sleep_seconds)
 
         except Exception as e:
             logger.error(f"Error starting application: {e}", exc_info=True)
