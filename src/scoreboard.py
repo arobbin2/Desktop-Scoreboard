@@ -23,7 +23,7 @@ class LEDScoreboard:
         width: int = 64,
         height: int = 32,
         brightness: int = 90,
-        gpio_slowdown: int = 10,
+        gpio_slowdown: int = 4,
         hardware_mapping: str = "regular",
         chain_length: int = 4,
         parallel: int = 1,
