@@ -471,15 +471,16 @@ class LEDScoreboard:
             balls = balls_match.group(1) if balls_match else "0"
             strikes = strikes_match.group(1) if strikes_match else "0"
             outs = outs_match.group(1) if outs_match else "0"
-            compact_count = f"{balls}-{strikes}  {outs} OUT"
+            bs_text = f"{balls}-{strikes}"
+            outs_text = f"{outs} OUT"
 
             if "LOADED" in bases_text:
-                compact_bases = "ON: 1 2 3"
+                compact_bases = "1 2 3"
             else:
                 on_first = "1B" in bases_text
                 on_second = "2B" in bases_text
                 on_third = "3B" in bases_text
-                compact_bases = "ON: " + ("1" if on_first else "-") + ("2" if on_second else "-") + ("3" if on_third else "-")
+                compact_bases = ("1" if on_first else "-") + ("2" if on_second else "-") + ("3" if on_third else "-")
 
             compact_status = status_text
             if "IN PROGRESS" in compact_status:
@@ -492,9 +493,14 @@ class LEDScoreboard:
             is_live = compact_status in {"LIVE", "IN PROGRESS"}
 
             # Text colors chosen to sit on top of the provided Cubs template.
-            gold = (255, 222, 0)
+            yellow = (255, 222, 0)
+            cubs_blue = (0, 90, 255)
+            rangers_red = (255, 0, 0)
             white = (255, 255, 255)
             gray = (170, 170, 170)
+
+            away_team_color = cubs_blue if away_team == "CHC" else (rangers_red if away_team == "TEX" else white)
+            home_team_color = cubs_blue if home_team == "CHC" else (rangers_red if home_team == "TEX" else white)
 
             team_font = fit_font(
                 away_team if len(away_team) >= len(home_team) else home_team,
@@ -505,23 +511,26 @@ class LEDScoreboard:
             )
             score_font = fit_font("88", 56, max_size=16, min_size=12, bold=True)
             inning_font = fit_font(inning_text or "TOP 9", 136, max_size=12, min_size=9, bold=True)
-            count_font = fit_font(compact_count, 136, max_size=11, min_size=8, bold=True)
-            bases_font = fit_font(compact_bases, 136, max_size=10, min_size=8, bold=True)
+            bs_font = fit_font(bs_text, 88, max_size=14, min_size=10, bold=True)
+            bases_font = fit_font(compact_bases, 64, max_size=11, min_size=8, bold=True)
+            outs_font = fit_font(outs_text, 64, max_size=11, min_size=8, bold=True)
             status_font = fit_font(compact_status or "LIVE", 136, max_size=10, min_size=8, bold=True)
 
             away_x = 29
             home_x = self.width - 29
             center_x = self.width // 2
 
-            draw_centered(away_x, 1, away_team, team_font, gold)
-            draw_centered(home_x, 1, home_team, team_font, gold)
-            draw_centered(center_x, 1, inning_text or "-", inning_font, white)
+            draw_centered(away_x, 1, away_team, team_font, away_team_color)
+            draw_centered(home_x, 1, home_team, team_font, home_team_color)
+            draw_centered(center_x, 1, inning_text or "-", inning_font, yellow)
 
             draw_centered(away_x, 14, away_score, score_font, white)
             draw_centered(home_x, 14, home_score, score_font, white)
 
-            draw_centered(center_x, 12, compact_count, count_font, white)
-            draw_centered(center_x, 19, compact_bases, bases_font, gold)
+            # Center stack: bigger balls/strikes under inning, bases left, outs right.
+            draw_centered(center_x, 12, bs_text, bs_font, white)
+            draw_centered(center_x - 48, 12, compact_bases, bases_font, white)
+            draw_centered(center_x + 48, 12, outs_text, outs_font, rangers_red)
             draw_centered(center_x, 25, compact_status, status_font, (0, 255, 0) if is_live else gray)
 
             self.matrix.SetImage(image)
