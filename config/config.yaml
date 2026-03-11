@@ -60,8 +60,8 @@ rss:
   refresh_seconds: 300
   timeout_seconds: 4.0
   scroll_step: 6
-  frame_interval_seconds: 0.08
+  frame_interval_seconds: 0.04
   ticker_gap: 24
   color: [255, 255, 255]
-  font_size: 30
+  font_size: 20
   fallback_text: "RSS: waiting for headlines"
