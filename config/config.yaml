@@ -37,7 +37,7 @@ app:
 
 # Mode Management
 modes:
-  default_mode: scoreboard  # scoreboard | clock | rss
+  default_mode: scoreboard  # scoreboard | clock | rss | cubs
 
 # Clock Display Configuration
 clock:
@@ -68,3 +68,11 @@ rss:
   color: [255, 255, 255]
   font_size: 20
   fallback_text: "RSS: waiting for headlines"
+
+# Cubs Live Game Mode (MLB Stats API)
+cubs:
+  team_id: 112  # Chicago Cubs
+  refresh_seconds: 15
+  timeout_seconds: 4.0
+  off_day_text: "No Cubs Game Today"
+  show_when_final: true

@@ -9,6 +9,7 @@ import urllib.parse
 import urllib.request
 import json
 import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta, timezone
 import yaml
 from typing import Dict, Any, Optional, Tuple, List
 
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
 class ScoreboardApp:
     """Main application controller"""
 
-    VALID_MODES = {"scoreboard", "clock", "rss"}
+    VALID_MODES = {"scoreboard", "clock", "rss", "cubs"}
 
     def __init__(self, config_path: str = "config/config.yaml"):
         """
@@ -160,6 +161,26 @@ class ScoreboardApp:
         self.rss_last_frame_time = 0.0
         self.rss_next_fetch_time = 0.0
 
+        cubs_config = self.config.get("cubs") or {}
+        self.cubs_team_id = self._as_int(cubs_config.get("team_id"), fallback=112, minimum=1)
+        self.cubs_timeout_seconds = self._as_float(cubs_config.get("timeout_seconds"), fallback=4.0, minimum=1.0)
+        self.cubs_refresh_seconds = self._as_int(cubs_config.get("refresh_seconds"), fallback=15, minimum=5)
+        self.cubs_off_day_text = str(cubs_config.get("off_day_text", "No Cubs Game Today")).strip()
+        self.cubs_show_when_final = bool(cubs_config.get("show_when_final", True))
+
+        self.cubs_state: Dict[str, Any] = {
+            "away_team": "AWAY",
+            "home_team": "HOME",
+            "away_score": "-",
+            "home_score": "-",
+            "inning_text": "WAITING",
+            "count_text": "B0 S0 O0",
+            "bases_text": "BASES: ---",
+            "status_text": self.cubs_off_day_text or "No Cubs Game",
+        }
+        self.cubs_next_fetch_time = 0.0
+        self.cubs_last_render_key = ""
+
         # Set up signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
@@ -225,6 +246,9 @@ class ScoreboardApp:
             if self.active_mode == "rss":
                 self._refresh_rss_if_due(now=time.time(), force=True)
 
+            if self.active_mode == "cubs":
+                self._refresh_cubs_if_due(now=time.time(), force=True)
+
             # Keep the application running
             while self.running:
                 self._tick_active_mode()
@@ -275,6 +299,10 @@ class ScoreboardApp:
 
         if self.active_mode == "rss":
             self._tick_rss_mode(now)
+            return
+
+        if self.active_mode == "cubs":
+            self._tick_cubs_mode(now)
             return
 
         if self.active_mode == "clock":
@@ -362,6 +390,190 @@ class ScoreboardApp:
         else:
             self.rss_ticker_text = self.rss_fallback_text or "RSS: no headlines"
 
+    def _tick_cubs_mode(self, now: float) -> None:
+        """Refresh Cubs game state and render only when it changes."""
+        if self.scoreboard is None:
+            return
+
+        self._refresh_cubs_if_due(now)
+        render_key = json.dumps(self.cubs_state, sort_keys=True)
+        if render_key == self.cubs_last_render_key:
+            return
+
+        self.cubs_last_render_key = render_key
+        self.scoreboard.display_baseball_game(self.cubs_state)
+
+    def _refresh_cubs_if_due(self, now: float, force: bool = False) -> None:
+        """Refresh Cubs live game snapshot at configured intervals."""
+        if not force and now < self.cubs_next_fetch_time:
+            return
+
+        self.cubs_next_fetch_time = now + self.cubs_refresh_seconds
+        next_state = self._fetch_cubs_game_state()
+        if next_state:
+            self.cubs_state = next_state
+
+    def _fetch_cubs_game_state(self) -> Dict[str, Any]:
+        """Fetch current Cubs game info from MLB Stats API."""
+        local_today = datetime.now().date()
+        start_date = (local_today - timedelta(days=1)).isoformat()
+        end_date = (local_today + timedelta(days=1)).isoformat()
+        schedule_params = {
+            "sportId": 1,
+            "teamId": self.cubs_team_id,
+            "startDate": start_date,
+            "endDate": end_date,
+            "hydrate": "team",
+        }
+        schedule_url = (
+            "https://statsapi.mlb.com/api/v1/schedule?"
+            + urllib.parse.urlencode(schedule_params)
+        )
+
+        try:
+            with urllib.request.urlopen(schedule_url, timeout=self.cubs_timeout_seconds) as response:
+                schedule_payload = json.loads(response.read().decode("utf-8"))
+        except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+            logger.warning(f"Unable to refresh Cubs schedule: {exc}")
+            return {
+                **self.cubs_state,
+                "status_text": "MLB API Unavailable",
+            }
+
+        game = self._select_preferred_cubs_game(schedule_payload)
+        if not game:
+            return {
+                "away_team": "CUBS",
+                "home_team": "-",
+                "away_score": "-",
+                "home_score": "-",
+                "inning_text": "OFF DAY",
+                "count_text": "B0 S0 O0",
+                "bases_text": "BASES: ---",
+                "status_text": self.cubs_off_day_text or "No Cubs Game",
+            }
+
+        game_pk = game.get("gamePk")
+        if not game_pk:
+            return {
+                **self.cubs_state,
+                "status_text": "Missing Game Data",
+            }
+
+        live_url = f"https://statsapi.mlb.com/api/v1.1/game/{int(game_pk)}/feed/live"
+        try:
+            with urllib.request.urlopen(live_url, timeout=self.cubs_timeout_seconds) as response:
+                live_payload = json.loads(response.read().decode("utf-8"))
+        except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+            logger.warning(f"Unable to refresh Cubs live feed: {exc}")
+            return {
+                **self.cubs_state,
+                "status_text": "Live Feed Error",
+            }
+
+        return self._build_cubs_display_state(live_payload)
+
+    def _select_preferred_cubs_game(self, schedule_payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Select the most relevant Cubs game from schedule payload."""
+        all_games: List[Dict[str, Any]] = []
+        for date_block in schedule_payload.get("dates", []):
+            games = date_block.get("games") or []
+            for game in games:
+                if isinstance(game, dict):
+                    all_games.append(game)
+
+        if not all_games:
+            return None
+
+        live_games = [
+            game
+            for game in all_games
+            if str((game.get("status") or {}).get("abstractGameState", "")).lower() == "live"
+        ]
+        if live_games:
+            return live_games[0]
+
+        if self.cubs_show_when_final:
+            final_games = [
+                game
+                for game in all_games
+                if str((game.get("status") or {}).get("abstractGameState", "")).lower() == "final"
+            ]
+            if final_games:
+                return final_games[-1]
+
+        now = datetime.now(timezone.utc)
+
+        def game_time_distance_seconds(game: Dict[str, Any]) -> float:
+            raw = game.get("gameDate")
+            if not raw:
+                return float("inf")
+            try:
+                parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+                return abs((parsed - now).total_seconds())
+            except ValueError:
+                return float("inf")
+
+        return min(all_games, key=game_time_distance_seconds)
+
+    def _build_cubs_display_state(self, live_payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Build compact display state from MLB live feed payload."""
+        game_data = live_payload.get("gameData") or {}
+        live_data = live_payload.get("liveData") or {}
+        linescore = live_data.get("linescore") or {}
+        status = game_data.get("status") or {}
+
+        teams = game_data.get("teams") or {}
+        away_team = ((teams.get("away") or {}).get("abbreviation") or "AWAY").upper()[:4]
+        home_team = ((teams.get("home") or {}).get("abbreviation") or "HOME").upper()[:4]
+
+        score_teams = linescore.get("teams") or {}
+        away_score = str(((score_teams.get("away") or {}).get("runs", "-")))[:2]
+        home_score = str(((score_teams.get("home") or {}).get("runs", "-")))[:2]
+
+        inning_state = str(linescore.get("inningState") or "").strip().upper()
+        current_inning = str(linescore.get("currentInning") or "-")
+        if inning_state in {"TOP", "BOTTOM", "MID", "END"}:
+            inning_text = f"{inning_state} {current_inning}"
+        else:
+            short_state = (inning_state[:3] + " ") if inning_state else ""
+            inning_text = f"{short_state}{current_inning}".strip()[:10]
+
+        balls = int(linescore.get("balls") or 0)
+        strikes = int(linescore.get("strikes") or 0)
+        outs = int(linescore.get("outs") or 0)
+        count_text = f"B{balls} S{strikes} O{outs}"
+
+        offense = linescore.get("offense") or {}
+        on_first = bool(offense.get("first"))
+        on_second = bool(offense.get("second"))
+        on_third = bool(offense.get("third"))
+
+        if on_first and on_second and on_third:
+            bases_text = "BASES: LOADED"
+        else:
+            occupied: List[str] = []
+            if on_first:
+                occupied.append("1B")
+            if on_second:
+                occupied.append("2B")
+            if on_third:
+                occupied.append("3B")
+            bases_text = "BASES: " + (" ".join(occupied) if occupied else "---")
+
+        status_text = str(status.get("detailedState") or status.get("abstractGameState") or "")
+
+        return {
+            "away_team": away_team,
+            "home_team": home_team,
+            "away_score": away_score,
+            "home_score": home_score,
+            "inning_text": inning_text,
+            "count_text": count_text,
+            "bases_text": bases_text,
+            "status_text": status_text,
+        }
+
     def _fetch_rss_headlines(self) -> List[str]:
         """Fetch headline titles from RSS or Atom feeds using stdlib XML parsing."""
         try:
@@ -426,6 +638,7 @@ class ScoreboardApp:
         mode_request = payload.get("mode")
         if mode_request is None and payload.get("action") == "set_mode":
             mode_request = payload.get("value")
+        normalized_mode_request = str(mode_request).strip().lower() if mode_request is not None else ""
         if mode_request:
             self._set_mode(str(mode_request), reason="mqtt control")
 
@@ -441,6 +654,20 @@ class ScoreboardApp:
         if bool(payload.get("rss_refresh_now", False)):
             self._refresh_rss_if_due(now=time.time(), force=True)
 
+        cubs_team_id = payload.get("cubs_team_id")
+        if cubs_team_id is None and normalized_mode_request == "cubs":
+            cubs_team_id = payload.get("team_id")
+        if cubs_team_id is not None:
+            self.cubs_team_id = self._as_int(cubs_team_id, fallback=self.cubs_team_id, minimum=1)
+            self.cubs_next_fetch_time = 0.0
+
+        cubs_refresh = payload.get("cubs_refresh_seconds")
+        if cubs_refresh is not None:
+            self.cubs_refresh_seconds = self._as_int(cubs_refresh, fallback=self.cubs_refresh_seconds, minimum=5)
+
+        if bool(payload.get("cubs_refresh_now", False)):
+            self._refresh_cubs_if_due(now=time.time(), force=True)
+
     def _set_mode(self, requested_mode: str, reason: str = "") -> None:
         """Switch active mode if valid."""
         normalized_mode = self._normalize_mode(requested_mode)
@@ -455,6 +682,10 @@ class ScoreboardApp:
             self.rss_scroll_px_float = 0.0
             self.rss_last_frame_time = 0.0
             self._refresh_rss_if_due(now=time.time(), force=True)
+
+        if normalized_mode == "cubs":
+            self.cubs_last_render_key = ""
+            self._refresh_cubs_if_due(now=time.time(), force=True)
 
         logger.info(
             f"Mode changed from '{previous_mode}' to '{normalized_mode}'"

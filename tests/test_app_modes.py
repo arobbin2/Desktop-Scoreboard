@@ -73,6 +73,7 @@ class TestAppModes(unittest.TestCase):
 
     def test_normalize_mode_falls_back(self):
         self.assertEqual(self.app._normalize_mode("rss"), "rss")
+        self.assertEqual(self.app._normalize_mode("cubs"), "cubs")
         self.assertEqual(self.app._normalize_mode("not-a-mode"), "scoreboard")
 
     def test_control_string_switches_mode(self):
@@ -126,6 +127,59 @@ class TestAppModes(unittest.TestCase):
             headlines = self.app._fetch_rss_headlines()
 
         self.assertEqual(headlines, ["Atom One", "Atom Two"])
+
+    def test_control_dict_updates_cubs_settings(self):
+        payload = {
+            "mode": "cubs",
+            "team_id": 119,
+            "cubs_refresh_seconds": 12,
+            "cubs_refresh_now": True,
+        }
+
+        with patch.object(self.app, "_refresh_cubs_if_due") as refresh_mock:
+            self.app._handle_control_message(payload)
+
+        self.assertEqual(self.app.active_mode, "cubs")
+        self.assertEqual(self.app.cubs_team_id, 119)
+        self.assertEqual(self.app.cubs_refresh_seconds, 12)
+        refresh_mock.assert_called()
+
+    def test_build_cubs_display_state_includes_counts_and_bases(self):
+        payload = {
+            "gameData": {
+                "status": {"detailedState": "In Progress"},
+                "teams": {
+                    "away": {"abbreviation": "CHC"},
+                    "home": {"abbreviation": "MIL"},
+                },
+            },
+            "liveData": {
+                "linescore": {
+                    "inningState": "Top",
+                    "currentInning": 7,
+                    "balls": 2,
+                    "strikes": 1,
+                    "outs": 1,
+                    "teams": {
+                        "away": {"runs": 4},
+                        "home": {"runs": 3},
+                    },
+                    "offense": {
+                        "first": {"id": 1},
+                        "second": {"id": 2},
+                    },
+                }
+            },
+        }
+
+        built = self.app._build_cubs_display_state(payload)
+        self.assertEqual(built["away_team"], "CHC")
+        self.assertEqual(built["home_team"], "MIL")
+        self.assertEqual(built["away_score"], "4")
+        self.assertEqual(built["home_score"], "3")
+        self.assertEqual(built["inning_text"], "TOP 7")
+        self.assertEqual(built["count_text"], "B2 S1 O1")
+        self.assertEqual(built["bases_text"], "BASES: 1B 2B")
 
 
 if __name__ == "__main__":

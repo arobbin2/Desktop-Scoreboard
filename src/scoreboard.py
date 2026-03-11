@@ -128,6 +128,11 @@ class LEDScoreboard:
         self.current_text = text
         self._render_ticker(text, scroll_px, color, font_size, ticker_gap)
 
+    def display_baseball_game(self, data: Dict[str, Any]) -> None:
+        """Display baseball scoreboard details (score, count, bases, inning)."""
+        self.current_data = data
+        self._render_baseball_game(data)
+
     def _render_text(self, text: str, color: tuple = (255, 0, 0)) -> None:
         """Render text to the matrix"""
         if self.matrix is None:
@@ -406,6 +411,80 @@ class LEDScoreboard:
             self.matrix.SetImage(image)
         except Exception as e:
             logger.error(f"Error rendering ticker: {e}")
+
+    def _render_baseball_game(self, data: Dict[str, Any]) -> None:
+        """Render a compact baseball layout for live game tracking."""
+        if self.matrix is None:
+            logger.info(f"Mock display baseball game: {data}")
+            return
+
+        try:
+            image = Image.new("RGB", (self.width, self.height), color=(0, 0, 0))
+            draw = ImageDraw.Draw(image)
+
+            def load_font(size: int, bold: bool = False) -> ImageFont.ImageFont:
+                path = (
+                    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+                    if bold
+                    else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+                )
+                try:
+                    return ImageFont.truetype(path, max(8, int(size)))
+                except OSError:
+                    return ImageFont.load_default()
+
+            def fit_font(text: str, max_width: int, max_size: int, min_size: int = 8, bold: bool = False) -> ImageFont.ImageFont:
+                for size in range(max_size, min_size - 1, -1):
+                    candidate = load_font(size, bold=bold)
+                    bbox = draw.textbbox((0, 0), text, font=candidate)
+                    if (bbox[2] - bbox[0]) <= max_width:
+                        return candidate
+                return load_font(min_size, bold=bold)
+
+            def draw_centered(cx: int, top: int, text: str, font: ImageFont.ImageFont, fill: tuple) -> None:
+                bbox = draw.textbbox((0, 0), text, font=font)
+                x = cx - ((bbox[2] - bbox[0]) // 2) - bbox[0]
+                y = top - bbox[1]
+                draw.text((x, y), text, font=font, fill=fill)
+
+            away_team = str(data.get("away_team", "AWAY")).upper()[:4]
+            home_team = str(data.get("home_team", "HOME")).upper()[:4]
+            away_score = str(data.get("away_score", "-"))[:2]
+            home_score = str(data.get("home_score", "-"))[:2]
+            inning_text = str(data.get("inning_text", "-")).upper()[:10]
+            count_text = str(data.get("count_text", "B0 S0 O0")).upper()[:12]
+            bases_text = str(data.get("bases_text", "BASES: ---")).upper()[:16]
+            status_text = str(data.get("status_text", "")).upper()[:18]
+
+            team_font = fit_font(
+                away_team if len(away_team) >= len(home_team) else home_team,
+                int(self.width * 0.14),
+                max(10, int(self.height * 0.36)),
+                min_size=8,
+                bold=True,
+            )
+            score_font = fit_font("88", int(self.width * 0.12), max(14, int(self.height * 0.56)), min_size=10, bold=True)
+            inning_font = fit_font(inning_text or "TOP 9", int(self.width * 0.28), max(11, int(self.height * 0.4)), min_size=8, bold=True)
+            info_font = fit_font(count_text if len(count_text) >= len(bases_text) else bases_text, int(self.width * 0.55), max(10, int(self.height * 0.34)), min_size=8, bold=False)
+            status_font = fit_font(status_text or "LIVE", int(self.width * 0.55), max(10, int(self.height * 0.34)), min_size=8, bold=False)
+
+            away_x = int(self.width * 0.08)
+            home_x = int(self.width * 0.92)
+            center_x = self.width // 2
+
+            draw_centered(away_x, 1, away_team, team_font, (255, 255, 0))
+            draw_centered(home_x, 1, home_team, team_font, (255, 255, 0))
+            draw_centered(away_x, int(self.height * 0.42), away_score, score_font, (255, 255, 255))
+            draw_centered(home_x, int(self.height * 0.42), home_score, score_font, (255, 255, 255))
+
+            draw_centered(center_x, 1, inning_text or "-", inning_font, (0, 255, 255))
+            draw_centered(center_x, int(self.height * 0.36), count_text, info_font, (255, 255, 255))
+            draw_centered(center_x, int(self.height * 0.62), bases_text, info_font, (255, 128, 0))
+            draw_centered(center_x, int(self.height * 0.8), status_text, status_font, (0, 255, 0))
+
+            self.matrix.SetImage(image)
+        except Exception as e:
+            logger.error(f"Error rendering baseball game: {e}")
 
     def clear(self) -> None:
         """Clear the display"""

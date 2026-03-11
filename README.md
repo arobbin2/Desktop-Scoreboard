@@ -7,7 +7,7 @@ LED Matrix scoreboard driver for Raspberry Pi 5 with MQTT support. Receives scor
 - **MQTT Integration**: Receive real-time scoreboard updates from Node-RED
 - **LED Matrix Support**: Drive RGB LED matrices using rpi-rgb-led-matrix
 - **Flexible Display**: Show both text and structured scoreboard data (teams, scores, status)
-- **Display Modes**: Switch between `scoreboard`, `clock`, and `rss` ticker modes at runtime
+- **Display Modes**: Switch between `scoreboard`, `clock`, `rss` ticker, and `cubs` live game modes at runtime
 - **Configurable**: YAML-based configuration for MQTT, matrix hardware, and display settings
 - **Mock Mode**: Test without hardware using mock display functions
 - **Graceful Shutdown**: Proper signal handling for clean application termination
@@ -98,12 +98,17 @@ matrix:
   parallel: 1                      # Number of parallel chains
 
 modes:
-  default_mode: scoreboard         # scoreboard | clock | rss
+  default_mode: scoreboard         # scoreboard | clock | rss | cubs
 
 rss:
   feed_url: https://news.google.com/rss
   refresh_seconds: 300
   scroll_step: 1
+
+cubs:
+  team_id: 112                     # Chicago Cubs
+  refresh_seconds: 15              # Live game refresh cadence
+  off_day_text: "No Cubs Game Today"
 ```
 
 ## Building/Running
@@ -215,11 +220,20 @@ JSON payload examples:
 }
 ```
 
+```json
+{
+  "mode": "cubs",
+  "cubs_refresh_seconds": 10,
+  "cubs_refresh_now": true
+}
+```
+
 Supported modes:
 
 - `scoreboard`: MQTT text/data messages render normally; idle clock can still take over
 - `clock`: Always shows the live clock/weather display
 - `rss`: Shows scrolling headlines from configured RSS/Atom feed
+- `cubs`: Shows current Cubs game score, inning, ball/strike/out count, and base occupancy
 
 ## Node-RED Integration
 
