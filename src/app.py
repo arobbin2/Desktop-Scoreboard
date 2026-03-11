@@ -125,6 +125,15 @@ class ScoreboardApp:
             fallback=0.08,
             minimum=0.01,
         )
+        derived_pixels_per_second = max(
+            1.0,
+            float(self.rss_scroll_step) / float(self.rss_frame_interval_seconds),
+        )
+        self.rss_scroll_pixels_per_second = self._as_float(
+            rss_config.get("scroll_pixels_per_second"),
+            fallback=derived_pixels_per_second,
+            minimum=1.0,
+        )
         self.rss_ticker_gap = self._as_int(rss_config.get("ticker_gap"), fallback=24, minimum=8)
         self.rss_font_size = self._as_optional_int(rss_config.get("font_size"), minimum=8)
         self.rss_fallback_text = str(rss_config.get("fallback_text", "RSS: waiting for headlines")).strip()
@@ -142,6 +151,7 @@ class ScoreboardApp:
         self.rss_headlines: List[str] = []
         self.rss_ticker_text = self.rss_fallback_text or "RSS"
         self.rss_scroll_px = 0
+        self.rss_scroll_px_float = 0.0
         self.rss_last_frame_time = 0.0
         self.rss_next_fetch_time = 0.0
 
@@ -303,7 +313,16 @@ class ScoreboardApp:
         if (now - self.rss_last_frame_time) < self.rss_frame_interval_seconds:
             return
 
+        elapsed_seconds = (
+            self.rss_frame_interval_seconds
+            if self.rss_last_frame_time <= 0
+            else max(0.0, now - self.rss_last_frame_time)
+        )
+
         self.rss_last_frame_time = now
+        self.rss_scroll_px_float += self.rss_scroll_pixels_per_second * elapsed_seconds
+        self.rss_scroll_px = int(self.rss_scroll_px_float)
+
         ticker_text = self.rss_ticker_text or self.rss_fallback_text or "RSS"
         self.scoreboard.display_ticker(
             ticker_text,
@@ -312,7 +331,6 @@ class ScoreboardApp:
             font_size=self.rss_font_size,
             ticker_gap=self.rss_ticker_gap,
         )
-        self.rss_scroll_px += self.rss_scroll_step
 
     def _refresh_rss_if_due(self, now: float, force: bool = False) -> None:
         """Refresh RSS headlines at configured intervals."""
@@ -330,6 +348,7 @@ class ScoreboardApp:
             self.rss_headlines = headlines
             self.rss_ticker_text = " | ".join(headlines)
             self.rss_scroll_px = 0
+            self.rss_scroll_px_float = 0.0
             logger.info(f"Loaded {len(headlines)} RSS headlines")
         else:
             self.rss_ticker_text = self.rss_fallback_text or "RSS: no headlines"
@@ -424,6 +443,7 @@ class ScoreboardApp:
 
         if normalized_mode == "rss":
             self.rss_scroll_px = 0
+            self.rss_scroll_px_float = 0.0
             self.rss_last_frame_time = 0.0
             self._refresh_rss_if_due(now=time.time(), force=True)
 
