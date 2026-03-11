@@ -72,7 +72,7 @@ rss:
 # Cubs Live Game Mode (MLB Stats API)
 cubs:
   team_id: 112  # Chicago Cubs
-  refresh_seconds: 15
+  refresh_seconds: 5
   timeout_seconds: 4.0
   off_day_text: "No Cubs Game Today"
   show_when_final: true
