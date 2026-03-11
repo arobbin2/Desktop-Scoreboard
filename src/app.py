@@ -125,6 +125,11 @@ class ScoreboardApp:
             fallback=0.08,
             minimum=0.01,
         )
+        self.rss_max_elapsed_factor = self._as_float(
+            rss_config.get("max_elapsed_factor"),
+            fallback=2.0,
+            minimum=1.0,
+        )
         derived_pixels_per_second = max(
             1.0,
             float(self.rss_scroll_step) / float(self.rss_frame_interval_seconds),
@@ -317,6 +322,10 @@ class ScoreboardApp:
             self.rss_frame_interval_seconds
             if self.rss_last_frame_time <= 0
             else max(0.0, now - self.rss_last_frame_time)
+        )
+        elapsed_seconds = min(
+            elapsed_seconds,
+            self.rss_frame_interval_seconds * self.rss_max_elapsed_factor,
         )
 
         self.rss_last_frame_time = now
