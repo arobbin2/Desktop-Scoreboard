@@ -19,6 +19,39 @@ logger = logging.getLogger(__name__)
 class LEDScoreboard:
     """Controls LED matrix display"""
 
+    MLB_PRIMARY_COLORS = {
+        "ARI": (167, 25, 48),
+        "ATL": (206, 17, 65),
+        "BAL": (223, 70, 1),
+        "BOS": (189, 48, 57),
+        "CHC": (14, 51, 134),
+        "CWS": (39, 37, 31),
+        "CIN": (198, 1, 31),
+        "CLE": (12, 35, 64),
+        "COL": (51, 0, 111),
+        "DET": (12, 35, 64),
+        "HOU": (235, 110, 31),
+        "KC": (0, 70, 135),
+        "LAA": (186, 0, 33),
+        "LAD": (0, 90, 156),
+        "MIA": (0, 163, 224),
+        "MIL": (18, 40, 75),
+        "MIN": (0, 43, 92),
+        "NYM": (0, 45, 114),
+        "NYY": (12, 35, 64),
+        "OAK": (0, 56, 49),
+        "PHI": (232, 24, 40),
+        "PIT": (253, 184, 39),
+        "SD": (47, 36, 29),
+        "SF": (253, 90, 30),
+        "SEA": (0, 92, 92),
+        "STL": (196, 30, 58),
+        "TB": (9, 44, 92),
+        "TEX": (192, 17, 31),
+        "TOR": (19, 74, 142),
+        "WSH": (171, 0, 3),
+    }
+
     def __init__(
         self,
         width: int = 64,
@@ -484,13 +517,12 @@ class LEDScoreboard:
 
             # Text colors chosen to sit on top of the provided Cubs template.
             yellow = (255, 222, 0)
-            cubs_blue = (0, 90, 255)
             rangers_red = (255, 0, 0)
             white = (255, 255, 255)
             gray = (170, 170, 170)
 
-            away_team_color = cubs_blue if away_team == "CHC" else (rangers_red if away_team == "TEX" else white)
-            home_team_color = cubs_blue if home_team == "CHC" else (rangers_red if home_team == "TEX" else white)
+            away_team_color = self._team_primary_color(away_team, fallback=white)
+            home_team_color = self._team_primary_color(home_team, fallback=white)
 
             team_font = fit_font(
                 away_team if len(away_team) >= len(home_team) else home_team,
@@ -544,6 +576,11 @@ class LEDScoreboard:
 
         logger.info("No Cubs reference template found; using code-drawn layout")
         return None
+
+    def _team_primary_color(self, team_abbreviation: str, fallback: tuple = (255, 255, 255)) -> tuple:
+        """Return MLB team primary color for a team abbreviation."""
+        key = str(team_abbreviation).strip().upper()[:3]
+        return self.MLB_PRIMARY_COLORS.get(key, fallback)
 
     def clear(self) -> None:
         """Clear the display"""
