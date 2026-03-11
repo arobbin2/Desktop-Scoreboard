@@ -293,7 +293,7 @@ class LEDScoreboard:
                     return ImageFont.load_default()
 
             clock_font = load_font(resolved_font_size)
-            right_font_size = max(8, int(resolved_font_size * 0.52))
+            right_font_size = max(8, int(resolved_font_size * 0.72))
             right_font = load_font(right_font_size)
 
             clock_bbox = draw.textbbox((0, 0), text, font=clock_font)

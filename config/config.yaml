@@ -39,7 +39,7 @@ clock:
   enabled: true
   format: "%H:%M:%S"
   color: [255, 255, 0]  # Clock font/text color (RGB)
-  font_size: 50  # Clock font size in pixels; adjust for readability/layout
+  font_size: 40  # Clock font size in pixels; adjust for readability/layout
   idle_after_seconds: 60  # Hold MQTT text/data this many seconds before clock returns
   weather:
     enabled: true
