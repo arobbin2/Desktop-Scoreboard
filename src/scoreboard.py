@@ -501,8 +501,8 @@ class LEDScoreboard:
             score_font = fit_font("88", 56, max_size=16, min_size=12, bold=True)
             inning_font = fit_font(inning_text or "TOP 9", 136, max_size=12, min_size=9, bold=True)
             bs_font = fit_font(bs_text, 104, max_size=20, min_size=13, bold=True)
-            bases_font = fit_font(compact_bases, 64, max_size=18, min_size=12, bold=True)
-            outs_font = fit_font(outs_text, 64, max_size=18, min_size=12, bold=True)
+            bases_font = fit_font(compact_bases, 64, max_size=15, min_size=12, bold=True)
+            outs_font = fit_font(outs_text, 64, max_size=15, min_size=12, bold=True)
 
             away_x = 29
             home_x = self.width - 29
