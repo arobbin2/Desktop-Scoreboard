@@ -301,7 +301,7 @@ class LEDScoreboard:
             clock_height = clock_bbox[3] - clock_bbox[1]
 
             right_text_value = str(right_text).strip() if right_text else ""
-            spacing = 3
+            spacing = 10
             right_width = 0
             right_bbox = None
             if right_text_value:
