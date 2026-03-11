@@ -64,6 +64,7 @@ class LEDScoreboard:
         led_rgb_sequence: str = "RGB",
         title_text: str = "COMPTON",
         assets_dir: Optional[str] = None,
+        use_cubs_template: bool = False,
     ):
         """
         Initialize LED matrix scoreboard
@@ -78,6 +79,7 @@ class LEDScoreboard:
             parallel: Number of parallel matrices
             title_text: Header text shown above the center clock in data mode
             assets_dir: Optional directory containing display assets (CUBS/base PNGs)
+            use_cubs_template: If true, uses CUBS.png as baseball background overlay
         """
         self.width = width * chain_length
         self.height = height * parallel
@@ -86,6 +88,7 @@ class LEDScoreboard:
         self.title_text = resolved_title if resolved_title else "COMPTON"
         resolved_assets_dir = str(assets_dir).strip() if assets_dir is not None else ""
         self.assets_dir = resolved_assets_dir or None
+        self.use_cubs_template = bool(use_cubs_template)
         self.matrix = None
         sequence = str(led_rgb_sequence).upper()
         if sorted(sequence) != ["B", "G", "R"]:
@@ -588,6 +591,15 @@ class LEDScoreboard:
 
     def _load_cubs_reference_template(self) -> Optional[Image.Image]:
         """Load the user-provided Cubs PNG as an overlay template for baseball mode."""
+        if not self.use_cubs_template and os.environ.get("SCOREBOARD_USE_CUBS_TEMPLATE", "").strip().lower() not in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }:
+            logger.info("Cubs reference template disabled; using code-drawn layout")
+            return None
+
         candidates = [os.path.join(path, "CUBS.png") for path in self._candidate_assets_dirs()]
         candidates += [os.path.join(path, "cubs.png") for path in self._candidate_assets_dirs()]
 
