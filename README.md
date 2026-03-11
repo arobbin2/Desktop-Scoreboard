@@ -7,6 +7,7 @@ LED Matrix scoreboard driver for Raspberry Pi 5 with MQTT support. Receives scor
 - **MQTT Integration**: Receive real-time scoreboard updates from Node-RED
 - **LED Matrix Support**: Drive RGB LED matrices using rpi-rgb-led-matrix
 - **Flexible Display**: Show both text and structured scoreboard data (teams, scores, status)
+- **Display Modes**: Switch between `scoreboard`, `clock`, and `rss` ticker modes at runtime
 - **Configurable**: YAML-based configuration for MQTT, matrix hardware, and display settings
 - **Mock Mode**: Test without hardware using mock display functions
 - **Graceful Shutdown**: Proper signal handling for clean application termination
@@ -95,6 +96,14 @@ matrix:
   hardware_mapping: regular        # Known-good default for direct GPIO wiring
   chain_length: 4                  # Number of chained panels horizontally
   parallel: 1                      # Number of parallel chains
+
+modes:
+  default_mode: scoreboard         # scoreboard | clock | rss
+
+rss:
+  feed_url: https://news.google.com/rss
+  refresh_seconds: 300
+  scroll_step: 1
 ```
 
 ## Building/Running
@@ -174,6 +183,43 @@ Publish text to `scoreboard/text`:
 ```
 SCORE: 24-21
 ```
+
+### Mode Control Message
+
+Publish to `scoreboard/control`.
+
+String payload examples:
+
+```
+mode:rss
+```
+
+```
+clock
+```
+
+JSON payload examples:
+
+```json
+{
+  "mode": "rss"
+}
+```
+
+```json
+{
+  "mode": "rss",
+  "feed_url": "https://feeds.bbci.co.uk/news/world/rss.xml",
+  "refresh_seconds": 180,
+  "rss_refresh_now": true
+}
+```
+
+Supported modes:
+
+- `scoreboard`: MQTT text/data messages render normally; idle clock can still take over
+- `clock`: Always shows the live clock/weather display
+- `rss`: Shows scrolling headlines from configured RSS/Atom feed
 
 ## Node-RED Integration
 

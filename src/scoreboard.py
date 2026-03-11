@@ -116,6 +116,18 @@ class LEDScoreboard:
         self.current_text = text
         self._render_clock(text, color, font_size, right_text, right_text_color)
 
+    def display_ticker(
+        self,
+        text: str,
+        scroll_px: int,
+        color: tuple = (255, 255, 255),
+        font_size: Optional[int] = None,
+        ticker_gap: int = 24,
+    ) -> None:
+        """Display a scrolling ticker frame, typically used for RSS headlines."""
+        self.current_text = text
+        self._render_ticker(text, scroll_px, color, font_size, ticker_gap)
+
     def _render_text(self, text: str, color: tuple = (255, 0, 0)) -> None:
         """Render text to the matrix"""
         if self.matrix is None:
@@ -346,6 +358,54 @@ class LEDScoreboard:
                 logger.debug(f"Rendered clock: {text}")
         except Exception as e:
             logger.error(f"Error rendering clock: {e}")
+
+    def _render_ticker(
+        self,
+        text: str,
+        scroll_px: int,
+        color: tuple = (255, 255, 255),
+        font_size: Optional[int] = None,
+        ticker_gap: int = 24,
+    ) -> None:
+        """Render one ticker animation frame at the requested pixel offset."""
+        text_value = str(text).strip() or "RSS"
+        step_px = max(0, int(scroll_px))
+
+        if self.matrix is None:
+            logger.debug(f"Mock display ticker: {text_value} (scroll_px: {step_px})")
+            return
+
+        try:
+            image = Image.new("RGB", (self.width, self.height), color=(0, 0, 0))
+            draw = ImageDraw.Draw(image)
+
+            resolved_font_size = font_size if font_size is not None else max(10, int(self.height * 0.45))
+            resolved_font_size = max(8, int(resolved_font_size))
+
+            try:
+                font = ImageFont.truetype(
+                    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                    resolved_font_size,
+                )
+            except OSError:
+                font = ImageFont.load_default()
+
+            text_bbox = draw.textbbox((0, 0), text_value, font=font)
+            text_width = text_bbox[2] - text_bbox[0]
+            text_height = text_bbox[3] - text_bbox[1]
+            y = ((self.height - text_height) // 2) - text_bbox[1]
+
+            gap = max(8, int(ticker_gap))
+            loop_span = max(1, text_width + gap)
+            x_primary = self.width - (step_px % loop_span)
+            x_secondary = x_primary + loop_span
+
+            draw.text((x_primary, y), text_value, fill=color, font=font)
+            draw.text((x_secondary, y), text_value, fill=color, font=font)
+
+            self.matrix.SetImage(image)
+        except Exception as e:
+            logger.error(f"Error rendering ticker: {e}")
 
     def clear(self) -> None:
         """Clear the display"""

@@ -8,8 +8,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import json
+import xml.etree.ElementTree as ET
 import yaml
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, List
 
 from src.mqtt_client import ScoreboardMQTTClient
 from src.scoreboard import LEDScoreboard
@@ -24,6 +25,8 @@ logger = logging.getLogger(__name__)
 class ScoreboardApp:
     """Main application controller"""
 
+    VALID_MODES = {"scoreboard", "clock", "rss"}
+
     def __init__(self, config_path: str = "config/config.yaml"):
         """
         Initialize the scoreboard application
@@ -37,6 +40,7 @@ class ScoreboardApp:
         self.running = False
         self.last_message_time = 0.0
         self.last_clock_second: Optional[int] = None
+        self.active_mode = "scoreboard"
 
         clock_config = self.config.get("clock") or {}
         self.clock_enabled = bool(clock_config.get("enabled", False))
@@ -98,6 +102,41 @@ class ScoreboardApp:
             self.weather_timeout_seconds = max(1.0, float(weather_config.get("timeout_seconds", 2.5)))
         except (TypeError, ValueError):
             self.weather_timeout_seconds = 2.5
+
+        mode_config = self.config.get("modes") or {}
+        requested_default_mode = str(mode_config.get("default_mode", "scoreboard"))
+        self.default_mode = self._normalize_mode(requested_default_mode)
+        self.active_mode = self.default_mode
+
+        rss_config = self.config.get("rss") or {}
+        self.rss_feed_url = str(rss_config.get("feed_url", "https://news.google.com/rss")).strip()
+        self.rss_timeout_seconds = self._as_float(rss_config.get("timeout_seconds"), fallback=4.0, minimum=1.0)
+        self.rss_refresh_seconds = self._as_int(rss_config.get("refresh_seconds"), fallback=300, minimum=30)
+        self.rss_scroll_step = self._as_int(rss_config.get("scroll_step"), fallback=1, minimum=1)
+        self.rss_frame_interval_seconds = self._as_float(
+            rss_config.get("frame_interval_seconds"),
+            fallback=0.08,
+            minimum=0.02,
+        )
+        self.rss_ticker_gap = self._as_int(rss_config.get("ticker_gap"), fallback=24, minimum=8)
+        self.rss_font_size = self._as_optional_int(rss_config.get("font_size"), minimum=8)
+        self.rss_fallback_text = str(rss_config.get("fallback_text", "RSS: waiting for headlines")).strip()
+
+        rss_color = rss_config.get("color", [255, 255, 255])
+        if isinstance(rss_color, list) and len(rss_color) == 3:
+            self.rss_color: Tuple[int, int, int] = (
+                int(rss_color[0]),
+                int(rss_color[1]),
+                int(rss_color[2]),
+            )
+        else:
+            self.rss_color = (255, 255, 255)
+
+        self.rss_headlines: List[str] = []
+        self.rss_ticker_text = self.rss_fallback_text or "RSS"
+        self.rss_scroll_px = 0
+        self.rss_last_frame_time = 0.0
+        self.rss_next_fetch_time = 0.0
 
         # Set up signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -161,10 +200,13 @@ class ScoreboardApp:
 
             logger.info("Scoreboard application running")
 
+            if self.active_mode == "rss":
+                self._refresh_rss_if_due(now=time.time(), force=True)
+
             # Keep the application running
             while self.running:
-                self._maybe_render_clock()
-                time.sleep(0.1)
+                self._tick_active_mode()
+                time.sleep(0.05)
 
         except Exception as e:
             logger.error(f"Error starting application: {e}", exc_info=True)
@@ -173,10 +215,22 @@ class ScoreboardApp:
     def _on_mqtt_message(self, topic: str, payload: Any) -> None:
         """Handle incoming MQTT message"""
         logger.debug(f"Received message on {topic}: {payload}")
+
+        normalized_topic = str(topic).strip().lower()
+        if normalized_topic.endswith("/control"):
+            self._handle_control_message(payload)
+            return
+
         self.last_message_time = time.time()
 
         try:
             if self.scoreboard is None:
+                return
+
+            if self.active_mode != "scoreboard":
+                logger.debug(
+                    f"Ignoring display payload while mode '{self.active_mode}' is active"
+                )
                 return
 
             # Handle different message types
@@ -193,15 +247,27 @@ class ScoreboardApp:
         except Exception as e:
             logger.error(f"Error processing MQTT message: {e}", exc_info=True)
 
-    def _maybe_render_clock(self) -> None:
+    def _tick_active_mode(self) -> None:
+        """Render whichever mode is currently active."""
+        now = time.time()
+
+        if self.active_mode == "rss":
+            self._tick_rss_mode(now)
+            return
+
+        if self.active_mode == "clock":
+            self._maybe_render_clock(now, respect_idle=False)
+            return
+
+        self._maybe_render_clock(now, respect_idle=True)
+
+    def _maybe_render_clock(self, now: float, respect_idle: bool) -> None:
         """Render a live clock when enabled and not actively showing MQTT updates."""
         if not self.clock_enabled or self.scoreboard is None:
             return
 
-        now = time.time()
-
         # If configured, only show clock after a quiet period since last MQTT update.
-        if self.clock_idle_after_seconds > 0 and self.last_message_time > 0:
+        if respect_idle and self.clock_idle_after_seconds > 0 and self.last_message_time > 0:
             if (now - self.last_message_time) < self.clock_idle_after_seconds:
                 return
 
@@ -219,6 +285,190 @@ class ScoreboardApp:
             right_text=self.weather_temperature_text,
             right_text_color=self.weather_color,
         )
+
+    def _tick_rss_mode(self, now: float) -> None:
+        """Refresh and render RSS ticker frames."""
+        if self.scoreboard is None:
+            return
+
+        self._refresh_rss_if_due(now)
+
+        if (now - self.rss_last_frame_time) < self.rss_frame_interval_seconds:
+            return
+
+        self.rss_last_frame_time = now
+        ticker_text = self.rss_ticker_text or self.rss_fallback_text or "RSS"
+        self.scoreboard.display_ticker(
+            ticker_text,
+            scroll_px=self.rss_scroll_px,
+            color=self.rss_color,
+            font_size=self.rss_font_size,
+            ticker_gap=self.rss_ticker_gap,
+        )
+        self.rss_scroll_px += self.rss_scroll_step
+
+    def _refresh_rss_if_due(self, now: float, force: bool = False) -> None:
+        """Refresh RSS headlines at configured intervals."""
+        if not self.rss_feed_url:
+            self.rss_ticker_text = self.rss_fallback_text or "RSS: feed URL not set"
+            return
+
+        if not force and now < self.rss_next_fetch_time:
+            return
+
+        self.rss_next_fetch_time = now + self.rss_refresh_seconds
+
+        headlines = self._fetch_rss_headlines()
+        if headlines:
+            self.rss_headlines = headlines
+            self.rss_ticker_text = " | ".join(headlines)
+            self.rss_scroll_px = 0
+            logger.info(f"Loaded {len(headlines)} RSS headlines")
+        else:
+            self.rss_ticker_text = self.rss_fallback_text or "RSS: no headlines"
+
+    def _fetch_rss_headlines(self) -> List[str]:
+        """Fetch headline titles from RSS or Atom feeds using stdlib XML parsing."""
+        try:
+            with urllib.request.urlopen(self.rss_feed_url, timeout=self.rss_timeout_seconds) as response:
+                xml_payload = response.read()
+
+            root = ET.fromstring(xml_payload)
+            headlines: List[str] = []
+
+            for item in root.findall(".//item"):
+                title = item.findtext("title")
+                cleaned = self._clean_headline(title)
+                if cleaned:
+                    headlines.append(cleaned)
+
+            if not headlines:
+                atom_namespace = {"atom": "http://www.w3.org/2005/Atom"}
+                for entry in root.findall(".//atom:entry", atom_namespace):
+                    title = entry.findtext("atom:title", default="", namespaces=atom_namespace)
+                    cleaned = self._clean_headline(title)
+                    if cleaned:
+                        headlines.append(cleaned)
+
+            return headlines[:20]
+        except (urllib.error.URLError, TimeoutError, ET.ParseError) as exc:
+            logger.warning(f"Unable to refresh RSS headlines: {exc}")
+            return []
+
+    @staticmethod
+    def _clean_headline(value: Optional[str]) -> str:
+        """Normalize headline text for compact display on the ticker."""
+        if value is None:
+            return ""
+        return " ".join(str(value).strip().split())
+
+    def _handle_control_message(self, payload: Any) -> None:
+        """Handle control messages used to switch modes and tune RSS settings."""
+        try:
+            if isinstance(payload, dict):
+                self._apply_control_dict(payload)
+                return
+
+            raw_text = str(payload).strip()
+            if not raw_text:
+                return
+
+            lowered = raw_text.lower()
+            if lowered.startswith("mode:"):
+                self._set_mode(raw_text.split(":", 1)[1], reason="mqtt control")
+                return
+
+            if lowered in self.VALID_MODES:
+                self._set_mode(lowered, reason="mqtt control")
+                return
+
+            logger.warning(f"Unsupported control message: {payload}")
+        except Exception as exc:
+            logger.error(f"Error handling control message: {exc}", exc_info=True)
+
+    def _apply_control_dict(self, payload: Dict[str, Any]) -> None:
+        """Apply dictionary-form control payloads."""
+        mode_request = payload.get("mode")
+        if mode_request is None and payload.get("action") == "set_mode":
+            mode_request = payload.get("value")
+        if mode_request:
+            self._set_mode(str(mode_request), reason="mqtt control")
+
+        rss_url = payload.get("rss_feed_url") or payload.get("feed_url")
+        if rss_url:
+            self.rss_feed_url = str(rss_url).strip()
+            self.rss_next_fetch_time = 0.0
+
+        refresh_value = payload.get("rss_refresh_seconds") or payload.get("refresh_seconds")
+        if refresh_value is not None:
+            self.rss_refresh_seconds = self._as_int(refresh_value, fallback=self.rss_refresh_seconds, minimum=30)
+
+        if bool(payload.get("rss_refresh_now", False)):
+            self._refresh_rss_if_due(now=time.time(), force=True)
+
+    def _set_mode(self, requested_mode: str, reason: str = "") -> None:
+        """Switch active mode if valid."""
+        normalized_mode = self._normalize_mode(requested_mode)
+        if normalized_mode == self.active_mode:
+            return
+
+        previous_mode = self.active_mode
+        self.active_mode = normalized_mode
+
+        if normalized_mode == "rss":
+            self.rss_scroll_px = 0
+            self.rss_last_frame_time = 0.0
+            self._refresh_rss_if_due(now=time.time(), force=True)
+
+        logger.info(
+            f"Mode changed from '{previous_mode}' to '{normalized_mode}'"
+            + (f" ({reason})" if reason else "")
+        )
+
+    def _normalize_mode(self, requested_mode: str) -> str:
+        """Normalize unknown modes back to scoreboard mode."""
+        normalized = str(requested_mode).strip().lower()
+        if normalized in self.VALID_MODES:
+            return normalized
+
+        logger.warning(f"Unknown mode '{requested_mode}'. Falling back to 'scoreboard'.")
+        return "scoreboard"
+
+    @staticmethod
+    def _as_int(value: Any, fallback: int, minimum: Optional[int] = None) -> int:
+        """Parse int settings safely with optional lower bound."""
+        try:
+            parsed = int(value)
+            if minimum is not None and parsed < minimum:
+                return minimum
+            return parsed
+        except (TypeError, ValueError):
+            return fallback
+
+    @staticmethod
+    def _as_float(value: Any, fallback: float, minimum: Optional[float] = None) -> float:
+        """Parse float settings safely with optional lower bound."""
+        try:
+            parsed = float(value)
+            if minimum is not None and parsed < minimum:
+                return minimum
+            return parsed
+        except (TypeError, ValueError):
+            return fallback
+
+    @staticmethod
+    def _as_optional_int(value: Any, minimum: int = 1) -> Optional[int]:
+        """Parse optional integer values, returning None on invalid input."""
+        if value is None:
+            return None
+
+        try:
+            parsed = int(value)
+            if parsed < minimum:
+                return None
+            return parsed
+        except (TypeError, ValueError):
+            return None
 
     def _maybe_refresh_weather(self, now: float) -> None:
         """Refresh cached weather data at the configured interval."""

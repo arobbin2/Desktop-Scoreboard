@@ -34,6 +34,10 @@ app:
   log_level: INFO
   mock_hardware: false  # Set to true to test without hardware
 
+# Mode Management
+modes:
+  default_mode: scoreboard  # scoreboard | clock | rss
+
 # Clock Display Configuration
 clock:
   enabled: true
@@ -49,3 +53,15 @@ clock:
     color: [0, 102, 255]  # Temperature text color (blue)
     refresh_seconds: 600  # Re-fetch every 10 minutes
     timeout_seconds: 2.5
+
+# RSS Ticker Mode
+rss:
+  feed_url: https://www.espn.com/espn/rss/news
+  refresh_seconds: 300
+  timeout_seconds: 4.0
+  scroll_step: 1
+  frame_interval_seconds: 0.08
+  ticker_gap: 24
+  color: [255, 255, 255]
+  font_size: 13
+  fallback_text: "RSS: waiting for headlines"
