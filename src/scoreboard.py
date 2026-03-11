@@ -607,39 +607,42 @@ class LEDScoreboard:
         """Load base occupancy PNGs keyed by `---`/`1--`/.../`123`."""
         assets_dir_candidates = self._candidate_assets_dirs()
         loaded: Dict[str, Image.Image] = {}
-
-        pattern = re.compile(r"^([1-][2-][3-])\.png$", re.IGNORECASE)
+        expected_files = {
+            "---": "---.png",
+            "--3": "--3.png",
+            "-2-": "-2-.png",
+            "-23": "-23.png",
+            "1--": "1--.png",
+            "1-3": "1-3.png",
+            "12-": "12-.png",
+            "123": "123.png",
+        }
 
         for assets_dir in assets_dir_candidates:
             if not os.path.isdir(assets_dir):
                 continue
 
-            try:
-                names = os.listdir(assets_dir)
-            except OSError as exc:
-                logger.warning(f"Unable to list assets directory '{assets_dir}': {exc}")
-                continue
-
-            for name in names:
-                match = pattern.match(name)
-                if not match:
+            dir_loaded_count = 0
+            for key, filename in expected_files.items():
+                path = os.path.join(assets_dir, filename)
+                if not os.path.exists(path):
                     continue
-
-                key = match.group(1)
-                path = os.path.join(assets_dir, name)
                 try:
                     loaded[key] = Image.open(path).convert("RGBA")
+                    dir_loaded_count += 1
                 except Exception as exc:
                     logger.warning(f"Unable to load base state asset '{path}': {exc}")
 
-            if loaded:
+            if dir_loaded_count > 0:
+                logger.info(f"Loaded {dir_loaded_count} base state asset(s) from '{assets_dir}'")
                 break
 
         if loaded:
-            logger.info(
-                f"Loaded {len(loaded)} base state asset(s) "
-                f"from '{next((d for d in assets_dir_candidates if os.path.isdir(d)), 'unknown')}'"
-            )
+            if len(loaded) < len(expected_files):
+                logger.info(
+                    f"Partial base assets loaded ({len(loaded)}/{len(expected_files)}). "
+                    f"Loaded keys: {sorted(loaded.keys())}"
+                )
         else:
             logger.info(
                 "No base state assets found; using text fallback. "
