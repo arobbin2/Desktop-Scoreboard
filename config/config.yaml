@@ -59,9 +59,9 @@ rss:
   feed_url: https://www.espn.com/espn/rss/news
   refresh_seconds: 300
   timeout_seconds: 4.0
-  scroll_step: 1
+  scroll_step: 3
   frame_interval_seconds: 0.08
   ticker_gap: 24
   color: [255, 255, 255]
-  font_size: 13
+  font_size: 20
   fallback_text: "RSS: waiting for headlines"
