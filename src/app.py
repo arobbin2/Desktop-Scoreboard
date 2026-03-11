@@ -116,7 +116,7 @@ class ScoreboardApp:
         self.rss_frame_interval_seconds = self._as_float(
             rss_config.get("frame_interval_seconds"),
             fallback=0.08,
-            minimum=0.02,
+            minimum=0.01,
         )
         self.rss_ticker_gap = self._as_int(rss_config.get("ticker_gap"), fallback=24, minimum=8)
         self.rss_font_size = self._as_optional_int(rss_config.get("font_size"), minimum=8)
