@@ -82,6 +82,12 @@ class LEDScoreboard:
         # Current display state
         self.current_text = ""
         self.current_data: Dict[str, Any] = {}
+        self.cubs_template = self._load_optional_template(
+            [
+                "/workspaces/Desktop-Scoreboard/Assets/CUBS.png",
+                "/workspaces/Desktop-Scoreboard/Assets/cubs.png",
+            ]
+        )
         self.cubs_logo = self._load_optional_logo(
             [
                 "/workspaces/Desktop-Scoreboard/Assets/CUBS.png",
@@ -427,7 +433,19 @@ class LEDScoreboard:
             return
 
         try:
-            image = Image.new("RGB", (self.width, self.height), color=(0, 0, 0))
+            if self.cubs_template is not None:
+                if self.cubs_template.size == (self.width, self.height):
+                    template_image = self.cubs_template.copy()
+                else:
+                    template_image = self.cubs_template.resize(
+                        (self.width, self.height),
+                        Image.Resampling.LANCZOS,
+                    )
+
+                image = Image.new("RGB", (self.width, self.height), color=(0, 0, 0))
+                image.paste(template_image, (0, 0), template_image)
+            else:
+                image = Image.new("RGB", (self.width, self.height), color=(0, 0, 0))
             draw = ImageDraw.Draw(image)
 
             def load_font(size: int, bold: bool = False) -> ImageFont.ImageFont:
@@ -512,7 +530,7 @@ class LEDScoreboard:
             draw_centered(away_x, int(self.height * 0.42), away_score, score_font, (255, 255, 255))
             draw_centered(home_x, int(self.height * 0.42), home_score, score_font, (255, 255, 255))
 
-            if self.cubs_logo is not None:
+            if self.cubs_template is None and self.cubs_logo is not None:
                 logo_x = center_x - (self.cubs_logo.width // 2)
                 logo_y = max(10, int(self.height * 0.34) - self.cubs_logo.height - 1)
                 image.paste(self.cubs_logo, (logo_x, logo_y), self.cubs_logo)
@@ -544,6 +562,19 @@ class LEDScoreboard:
                 return logo
             except Exception as exc:
                 logger.warning(f"Unable to load logo asset '{path}': {exc}")
+        return None
+
+    def _load_optional_template(self, candidate_paths: list) -> Optional[Image.Image]:
+        """Load full-size transparent PNG template for baseball mode background."""
+        for path in candidate_paths:
+            if not os.path.exists(path):
+                continue
+            try:
+                template = Image.open(path).convert("RGBA")
+                logger.info(f"Loaded baseball template asset: {path}")
+                return template
+            except Exception as exc:
+                logger.warning(f"Unable to load template asset '{path}': {exc}")
         return None
 
     def clear(self) -> None:
