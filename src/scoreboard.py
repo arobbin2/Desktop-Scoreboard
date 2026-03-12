@@ -650,11 +650,17 @@ class LEDScoreboard:
                 outline=(80, 80, 80),
                 fill=(0, 0, 0),
             )
-            if fill_width > 0:
-                draw.rectangle(
-                    [bar_x + 1, bar_y + 1, bar_x + fill_width - 1, bar_y + bar_height - 1],
-                    fill=color,
-                )
+            if fill_width >= 2:
+                fill_start_x = bar_x + 1
+                fill_end_x = bar_x + fill_width - 1
+                if fill_end_x >= fill_start_x:
+                    draw.rectangle(
+                        [fill_start_x, bar_y + 1, fill_end_x, bar_y + bar_height - 1],
+                        fill=color,
+                    )
+            elif fill_width == 1:
+                # For very low non-zero levels, draw a single pixel instead of a rectangle.
+                draw.point((bar_x + 1, bar_y + (bar_height // 2)), fill=color)
 
             label_text = str(label).strip().upper()[:10] or "METER"
             value_text = f"{clamped:.1f} dB"
