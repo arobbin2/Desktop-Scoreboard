@@ -13,9 +13,9 @@ class TestLEDScoreboard(unittest.TestCase):
 
     def test_initialization(self):
         """Test scoreboard initialization"""
-        self.assertEqual(self.scoreboard.width, 64)
+        self.assertEqual(self.scoreboard.width, 256)
         self.assertEqual(self.scoreboard.height, 32)
-        self.assertEqual(self.scoreboard.brightness, 100)
+        self.assertEqual(self.scoreboard.brightness, 90)
 
     def test_display_text(self):
         """Test displaying text"""
@@ -33,6 +33,12 @@ class TestLEDScoreboard(unittest.TestCase):
         }
         self.scoreboard.display_data(data)
         self.assertEqual(self.scoreboard.current_data, data)
+
+    def test_display_single_meter(self):
+        """Test displaying one audio meter value"""
+        self.scoreboard.display_single_meter(-18.5, label="CROWN")
+        self.assertEqual(self.scoreboard.current_data["label"], "CROWN")
+        self.assertEqual(self.scoreboard.current_data["meter_level_db"], -18.5)
 
     def test_brightness_validation(self):
         """Test brightness value validation"""

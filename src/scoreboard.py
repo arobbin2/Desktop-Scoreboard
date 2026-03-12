@@ -178,6 +178,21 @@ class LEDScoreboard:
         self.current_data = data
         self._render_baseball_game(data)
 
+    def display_single_meter(
+        self,
+        level_db: float,
+        label: str = "METER",
+        min_db: float = -60.0,
+        max_db: float = 0.0,
+        color: tuple = (0, 255, 255),
+    ) -> None:
+        """Display one horizontal audio meter bar from min_db to max_db."""
+        self.current_data = {
+            "meter_level_db": float(level_db),
+            "label": str(label),
+        }
+        self._render_single_meter(level_db, label=label, min_db=min_db, max_db=max_db, color=color)
+
     def _render_text(self, text: str, color: tuple = (255, 0, 0)) -> None:
         """Render text to the matrix"""
         if self.matrix is None:
@@ -588,6 +603,67 @@ class LEDScoreboard:
             self.matrix.SetImage(image)
         except Exception as e:
             logger.error(f"Error rendering baseball game: {e}")
+
+    def _render_single_meter(
+        self,
+        level_db: float,
+        label: str = "METER",
+        min_db: float = -60.0,
+        max_db: float = 0.0,
+        color: tuple = (0, 255, 255),
+    ) -> None:
+        """Render one simple audio meter bar and current dB value."""
+        if self.matrix is None:
+            logger.info(
+                f"Mock display single meter: label={label} level_db={level_db:.1f} "
+                f"range=[{min_db:.1f},{max_db:.1f}]"
+            )
+            return
+
+        try:
+            image = Image.new("RGB", (self.width, self.height), color=(0, 0, 0))
+            draw = ImageDraw.Draw(image)
+
+            try:
+                label_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 10)
+                value_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 12)
+            except OSError:
+                label_font = ImageFont.load_default()
+                value_font = ImageFont.load_default()
+
+            min_value = float(min_db)
+            max_value = float(max_db)
+            if max_value <= min_value:
+                max_value = min_value + 1.0
+
+            clamped = min(max_value, max(min_value, float(level_db)))
+            fraction = (clamped - min_value) / (max_value - min_value)
+
+            bar_x = 5
+            bar_y = self.height - 11
+            bar_width = max(10, self.width - 10)
+            bar_height = 7
+            fill_width = int(round(bar_width * fraction))
+
+            draw.rectangle(
+                [bar_x, bar_y, bar_x + bar_width, bar_y + bar_height],
+                outline=(80, 80, 80),
+                fill=(0, 0, 0),
+            )
+            if fill_width > 0:
+                draw.rectangle(
+                    [bar_x + 1, bar_y + 1, bar_x + fill_width - 1, bar_y + bar_height - 1],
+                    fill=color,
+                )
+
+            label_text = str(label).strip().upper()[:10] or "METER"
+            value_text = f"{clamped:.1f} dB"
+            draw.text((5, 1), label_text, fill=(180, 180, 180), font=label_font)
+            draw.text((5, 12), value_text, fill=(255, 255, 255), font=value_font)
+
+            self.matrix.SetImage(image)
+        except Exception as e:
+            logger.error(f"Error rendering single meter: {e}")
 
     def _load_cubs_reference_template(self) -> Optional[Image.Image]:
         """Load the user-provided Cubs PNG as an overlay template for baseball mode."""

@@ -39,7 +39,7 @@ app:
 
 # Mode Management
 modes:
-  default_mode: scoreboard  # scoreboard | clock | rss | cubs
+  default_mode: scoreboard  # scoreboard | clock | rss | cubs | crown
 
 # Clock Display Configuration
 clock:
@@ -78,3 +78,18 @@ cubs:
   timeout_seconds: 4.0
   off_day_text: "No Cubs Game Today"
   show_when_final: true
+
+# Crown Amplifier Live Meter Mode
+crown:
+  enabled: false  # Keep false until Crown feed is validated
+  meter_topic: scoreboard/crown/meter
+  udp_enabled: true
+  udp_bind_host: 0.0.0.0
+  udp_bind_port: 10001
+  udp_hex_byte_index: 0  # Which parsed hex byte maps to this single meter
+  meter_min_db: -60.0
+  meter_max_db: 0.0
+  frame_interval_seconds: 0.1
+  stale_after_seconds: 5.0
+  fallback_to_scoreboard_on_stale: true
+  waiting_text: "CROWN WAIT"

@@ -1,6 +1,7 @@
 """Main application - ties together MQTT and LED display"""
 
 import logging
+import socket
 import signal
 import sys
 import time
@@ -26,7 +27,7 @@ logger = logging.getLogger(__name__)
 class ScoreboardApp:
     """Main application controller"""
 
-    VALID_MODES = {"scoreboard", "clock", "rss", "cubs"}
+    VALID_MODES = {"scoreboard", "clock", "rss", "cubs", "crown"}
 
     def __init__(self, config_path: str = "config/config.yaml"):
         """
@@ -111,6 +112,33 @@ class ScoreboardApp:
         except (TypeError, ValueError):
             self.weather_timeout_seconds = 2.5
 
+        crown_config = self.config.get("crown") or {}
+        self.crown_enabled = bool(crown_config.get("enabled", False))
+        self.crown_meter_topic = str(crown_config.get("meter_topic", "scoreboard/crown/meter")).strip()
+        self.crown_meter_topic_normalized = self.crown_meter_topic.lower()
+        self.crown_udp_enabled = bool(crown_config.get("udp_enabled", True))
+        self.crown_udp_bind_host = str(crown_config.get("udp_bind_host", "0.0.0.0")).strip() or "0.0.0.0"
+        self.crown_udp_bind_port = self._as_int(crown_config.get("udp_bind_port"), fallback=10001, minimum=1)
+        self.crown_udp_hex_byte_index = self._as_int(crown_config.get("udp_hex_byte_index"), fallback=0, minimum=0)
+        self.crown_meter_min_db = self._as_float(crown_config.get("meter_min_db"), fallback=-60.0)
+        self.crown_meter_max_db = self._as_float(crown_config.get("meter_max_db"), fallback=0.0)
+        if self.crown_meter_max_db <= self.crown_meter_min_db:
+            self.crown_meter_max_db = self.crown_meter_min_db + 1.0
+        self.crown_frame_interval_seconds = self._as_float(
+            crown_config.get("frame_interval_seconds"),
+            fallback=0.1,
+            minimum=0.02,
+        )
+        self.crown_stale_after_seconds = self._as_float(
+            crown_config.get("stale_after_seconds"),
+            fallback=5.0,
+            minimum=0.5,
+        )
+        self.crown_fallback_to_scoreboard_on_stale = bool(
+            crown_config.get("fallback_to_scoreboard_on_stale", True)
+        )
+        self.crown_waiting_text = str(crown_config.get("waiting_text", "CROWN WAIT")).strip() or "CROWN WAIT"
+
         mode_config = self.config.get("modes") or {}
         requested_default_mode = str(mode_config.get("default_mode", "scoreboard"))
         self.default_mode = self._normalize_mode(requested_default_mode)
@@ -181,6 +209,17 @@ class ScoreboardApp:
         self.cubs_next_fetch_time = 0.0
         self.cubs_last_render_key = ""
 
+        self.crown_meter_state: Dict[str, Any] = {
+            "levels": [],
+            "updated_at": 0.0,
+            "status_text": self.crown_waiting_text,
+        }
+        self.crown_last_payload_time = 0.0
+        self.crown_last_render_key = ""
+        self.crown_last_frame_time = 0.0
+        self.crown_udp_socket: Optional[socket.socket] = None
+        self.crown_udp_bound_address = ""
+
         # Set up signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
@@ -249,6 +288,11 @@ class ScoreboardApp:
             if self.active_mode == "cubs":
                 self._refresh_cubs_if_due(now=time.time(), force=True)
 
+            if self.active_mode == "crown" and not self.crown_enabled:
+                self._set_mode("scoreboard", reason="crown disabled in config")
+            elif self.active_mode == "crown" and self.crown_udp_enabled:
+                self._ensure_crown_udp_socket()
+
             # Keep the application running
             while self.running:
                 self._tick_active_mode()
@@ -265,6 +309,10 @@ class ScoreboardApp:
         normalized_topic = str(topic).strip().lower()
         if normalized_topic.endswith("/control"):
             self._handle_control_message(payload)
+            return
+
+        if normalized_topic == self.crown_meter_topic_normalized:
+            self._handle_crown_meter_message(payload)
             return
 
         self.last_message_time = time.time()
@@ -309,7 +357,249 @@ class ScoreboardApp:
             self._maybe_render_clock(now, respect_idle=False)
             return
 
+        if self.active_mode == "crown":
+            self._tick_crown_mode(now)
+            return
+
         self._maybe_render_clock(now, respect_idle=True)
+
+    def _tick_crown_mode(self, now: float) -> None:
+        """Render Crown meter mode and fall back when feed becomes stale."""
+        if self.scoreboard is None:
+            return
+
+        if not self.crown_enabled:
+            self._set_mode("scoreboard", reason="crown disabled in config")
+            return
+
+        if self.crown_udp_enabled:
+            self._ensure_crown_udp_socket()
+            self._poll_crown_udp_packets()
+
+        if (now - self.crown_last_frame_time) < self.crown_frame_interval_seconds:
+            return
+
+        self.crown_last_frame_time = now
+
+        if self.crown_last_payload_time <= 0:
+            render_text = self.crown_waiting_text
+        else:
+            stale_seconds = now - self.crown_last_payload_time
+            if stale_seconds > self.crown_stale_after_seconds:
+                if self.crown_fallback_to_scoreboard_on_stale:
+                    self._set_mode("scoreboard", reason="crown feed stale")
+                    return
+                render_text = "CROWN STALE"
+            else:
+                render_text = self._format_crown_levels_text(self.crown_meter_state.get("levels") or [])
+
+        levels = self.crown_meter_state.get("levels") or []
+        has_meter_level = len(levels) > 0
+        meter_level = float(levels[0]) if has_meter_level else 0.0
+        render_key = f"meter:{meter_level:.2f}" if has_meter_level else f"text:{render_text}"
+
+        if render_key == self.crown_last_render_key:
+            return
+
+        self.crown_last_render_key = render_key
+        if has_meter_level and hasattr(self.scoreboard, "display_single_meter"):
+            self.scoreboard.display_single_meter(
+                meter_level,
+                label="CROWN",
+                min_db=self.crown_meter_min_db,
+                max_db=self.crown_meter_max_db,
+                color=(0, 255, 255),
+            )
+        else:
+            self.scoreboard.display_text(render_text, color=(0, 255, 255))
+
+    def _ensure_crown_udp_socket(self) -> None:
+        """Create a non-blocking UDP socket for Crown meter data if needed."""
+        if self.crown_udp_socket is not None:
+            return
+
+        try:
+            udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            udp_socket.bind((self.crown_udp_bind_host, self.crown_udp_bind_port))
+            udp_socket.setblocking(False)
+            self.crown_udp_socket = udp_socket
+            self.crown_udp_bound_address = f"{self.crown_udp_bind_host}:{self.crown_udp_bind_port}"
+            logger.info(f"Crown UDP listener bound on {self.crown_udp_bound_address}")
+        except OSError as exc:
+            self.crown_udp_socket = None
+            logger.warning(
+                f"Unable to bind Crown UDP listener on {self.crown_udp_bind_host}:{self.crown_udp_bind_port}: {exc}"
+            )
+
+    def _poll_crown_udp_packets(self) -> None:
+        """Read available UDP packets and update current Crown meter level."""
+        if self.crown_udp_socket is None:
+            return
+
+        # Drain a few packets so latest meter value is used without starving main loop.
+        for _ in range(5):
+            try:
+                payload, _addr = self.crown_udp_socket.recvfrom(2048)
+            except BlockingIOError:
+                return
+            except OSError as exc:
+                logger.warning(f"Crown UDP read error: {exc}")
+                return
+
+            level = self._extract_udp_meter_level(payload)
+            if level is None:
+                continue
+
+            now = time.time()
+            self.crown_meter_state = {
+                "levels": [level],
+                "updated_at": now,
+                "status_text": "udp-live",
+            }
+            self.crown_last_payload_time = now
+
+    def _extract_udp_meter_level(self, payload: bytes) -> Optional[float]:
+        """Extract a single meter level from UDP payload bytes or ASCII hex text."""
+        hex_bytes = self._extract_hex_bytes_from_udp_payload(payload)
+        if not hex_bytes:
+            return None
+
+        if self.crown_udp_hex_byte_index >= len(hex_bytes):
+            return None
+
+        raw_value = float(hex_bytes[self.crown_udp_hex_byte_index])
+        span = self.crown_meter_max_db - self.crown_meter_min_db
+        scaled = self.crown_meter_min_db + ((raw_value / 255.0) * span)
+        return min(self.crown_meter_max_db, max(self.crown_meter_min_db, scaled))
+
+    @staticmethod
+    def _extract_hex_bytes_from_udp_payload(payload: bytes) -> List[int]:
+        """Parse UDP payload as either binary bytes or ASCII hex byte tokens."""
+        if not payload:
+            return []
+
+        try:
+            text = payload.decode("ascii").strip()
+        except UnicodeDecodeError:
+            text = ""
+
+        if text:
+            # Accept forms like '7F', '0x7F', '7F 1A', or '7F,1A'.
+            normalized = text.replace(",", " ").replace("0x", "").replace("0X", "")
+            tokens = [token.strip() for token in normalized.split() if token.strip()]
+            if tokens:
+                parsed: List[int] = []
+                for token in tokens:
+                    if len(token) > 2:
+                        parsed = []
+                        break
+                    try:
+                        parsed.append(int(token, 16))
+                    except ValueError:
+                        parsed = []
+                        break
+                if parsed:
+                    return [value & 0xFF for value in parsed]
+
+            compact = "".join(character for character in normalized if character in "0123456789abcdefABCDEF")
+            if compact and (len(compact) % 2 == 0):
+                try:
+                    return [int(compact[index : index + 2], 16) for index in range(0, len(compact), 2)]
+                except ValueError:
+                    pass
+
+        return [int(value) & 0xFF for value in payload]
+
+    @staticmethod
+    def _format_crown_levels_text(levels: List[float]) -> str:
+        """Create a compact display string from channel dB levels."""
+        if not levels:
+            return "CROWN WAIT"
+
+        segments: List[str] = []
+        for index, level in enumerate(levels[:4], start=1):
+            rounded = int(round(float(level)))
+            segments.append(f"C{index}:{rounded}")
+        return " ".join(segments)
+
+    def _handle_crown_meter_message(self, payload: Any) -> None:
+        """Ingest Crown meter payloads regardless of current active mode."""
+        parsed_payload: Any = payload
+
+        if isinstance(parsed_payload, str):
+            stripped = parsed_payload.strip()
+            if not stripped:
+                return
+            try:
+                parsed_payload = json.loads(stripped)
+            except json.JSONDecodeError:
+                logger.warning("Ignoring non-JSON Crown meter payload")
+                return
+
+        levels = self._extract_crown_levels(parsed_payload)
+        if not levels:
+            logger.warning("Crown payload did not contain usable channel levels")
+            return
+
+        now = time.time()
+        self.crown_meter_state = {
+            "levels": levels,
+            "updated_at": now,
+            "status_text": "live",
+        }
+        self.crown_last_payload_time = now
+
+    def _extract_crown_levels(self, payload: Any) -> List[float]:
+        """Extract a level list from supported Crown payload shapes."""
+        if isinstance(payload, list):
+            return self._coerce_level_list(payload)
+
+        if not isinstance(payload, dict):
+            return []
+
+        if isinstance(payload.get("channels"), list):
+            channels = payload.get("channels") or []
+            extracted: List[Any] = []
+            for channel in channels:
+                if isinstance(channel, dict):
+                    if "db" in channel:
+                        extracted.append(channel.get("db"))
+                    elif "level" in channel:
+                        extracted.append(channel.get("level"))
+                    elif "value" in channel:
+                        extracted.append(channel.get("value"))
+                else:
+                    extracted.append(channel)
+            levels = self._coerce_level_list(extracted)
+            if levels:
+                return levels
+
+        if isinstance(payload.get("meters"), list):
+            levels = self._coerce_level_list(payload.get("meters") or [])
+            if levels:
+                return levels
+
+        stereo_candidates = [payload.get("left"), payload.get("right")]
+        stereo_levels = self._coerce_level_list(stereo_candidates)
+        if stereo_levels:
+            return stereo_levels
+
+        return []
+
+    @staticmethod
+    def _coerce_level_list(raw_values: List[Any]) -> List[float]:
+        """Convert a list of raw values into bounded float dB levels."""
+        parsed: List[float] = []
+        for value in raw_values:
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                continue
+
+            parsed.append(min(20.0, max(-120.0, numeric)))
+
+        return parsed
 
     def _maybe_render_clock(self, now: float, respect_idle: bool) -> None:
         """Render a live clock when enabled and not actively showing MQTT updates."""
@@ -635,6 +925,22 @@ class ScoreboardApp:
 
     def _apply_control_dict(self, payload: Dict[str, Any]) -> None:
         """Apply dictionary-form control payloads."""
+        if "crown_enabled" in payload:
+            self.crown_enabled = bool(payload.get("crown_enabled"))
+
+        crown_topic = payload.get("crown_meter_topic")
+        if crown_topic:
+            self.crown_meter_topic = str(crown_topic).strip()
+            self.crown_meter_topic_normalized = self.crown_meter_topic.lower()
+
+        crown_stale_after = payload.get("crown_stale_after_seconds")
+        if crown_stale_after is not None:
+            self.crown_stale_after_seconds = self._as_float(
+                crown_stale_after,
+                fallback=self.crown_stale_after_seconds,
+                minimum=0.5,
+            )
+
         mode_request = payload.get("mode")
         if mode_request is None and payload.get("action") == "set_mode":
             mode_request = payload.get("value")
@@ -668,6 +974,29 @@ class ScoreboardApp:
         if bool(payload.get("cubs_refresh_now", False)):
             self._refresh_cubs_if_due(now=time.time(), force=True)
 
+        if bool(payload.get("crown_reset", False)):
+            self.crown_meter_state = {
+                "levels": [],
+                "updated_at": 0.0,
+                "status_text": self.crown_waiting_text,
+            }
+            self.crown_last_payload_time = 0.0
+            self.crown_last_render_key = ""
+            self.crown_last_frame_time = 0.0
+
+    def _close_crown_udp_socket(self) -> None:
+        """Close UDP socket used by Crown mode."""
+        if self.crown_udp_socket is None:
+            return
+
+        try:
+            self.crown_udp_socket.close()
+        except OSError:
+            pass
+        finally:
+            self.crown_udp_socket = None
+            self.crown_udp_bound_address = ""
+
     def _set_mode(self, requested_mode: str, reason: str = "") -> None:
         """Switch active mode if valid."""
         normalized_mode = self._normalize_mode(requested_mode)
@@ -687,14 +1016,22 @@ class ScoreboardApp:
             self.cubs_last_render_key = ""
             self._refresh_cubs_if_due(now=time.time(), force=True)
 
+        if normalized_mode == "crown":
+            self.crown_last_render_key = ""
+            self.crown_last_frame_time = 0.0
+
         logger.info(
             f"Mode changed from '{previous_mode}' to '{normalized_mode}'"
             + (f" ({reason})" if reason else "")
         )
 
     def _normalize_mode(self, requested_mode: str) -> str:
-        """Normalize unknown modes back to scoreboard mode."""
+        """Normalize unknown or disabled modes back to scoreboard mode."""
         normalized = str(requested_mode).strip().lower()
+        if normalized == "crown" and not self.crown_enabled:
+            logger.warning("Mode 'crown' requested but crown.enabled is false. Using 'scoreboard'.")
+            return "scoreboard"
+
         if normalized in self.VALID_MODES:
             return normalized
 
@@ -794,6 +1131,8 @@ class ScoreboardApp:
 
         if self.mqtt_client:
             self.mqtt_client.stop()
+
+        self._close_crown_udp_socket()
 
         if self.scoreboard:
             self.scoreboard.shutdown()

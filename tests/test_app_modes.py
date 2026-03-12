@@ -1,9 +1,10 @@
 """Tests for app mode switching and RSS parsing."""
 
 import sys
+import time
 import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 # Stub paho-mqtt for environments where dependency is not installed.
 if "paho" not in sys.modules:
@@ -71,10 +72,83 @@ class TestAppModes(unittest.TestCase):
     def setUp(self):
         self.app = ScoreboardApp(config_path="config/does-not-exist.yaml")
 
+    def tearDown(self):
+        self.app._close_crown_udp_socket()
+
     def test_normalize_mode_falls_back(self):
         self.assertEqual(self.app._normalize_mode("rss"), "rss")
         self.assertEqual(self.app._normalize_mode("cubs"), "cubs")
+        self.assertEqual(self.app._normalize_mode("crown"), "scoreboard")
         self.assertEqual(self.app._normalize_mode("not-a-mode"), "scoreboard")
+
+    def test_crown_mode_requires_enable_flag(self):
+        self.app.active_mode = "scoreboard"
+        self.app._handle_control_message("mode:crown")
+        self.assertEqual(self.app.active_mode, "scoreboard")
+
+    def test_control_dict_can_enable_and_switch_to_crown_mode(self):
+        payload = {
+            "crown_enabled": True,
+            "mode": "crown",
+        }
+
+        self.app._handle_control_message(payload)
+
+        self.assertTrue(self.app.crown_enabled)
+        self.assertEqual(self.app.active_mode, "crown")
+
+    def test_crown_meter_payload_updates_state(self):
+        payload = {
+            "crown_enabled": True,
+            "mode": "crown",
+            "crown_meter_topic": "scoreboard/crown/meter",
+        }
+        self.app._handle_control_message(payload)
+
+        self.app._on_mqtt_message(
+            "scoreboard/crown/meter",
+            {"channels": [{"db": -13.2}, {"db": -9.8}]},
+        )
+
+        self.assertEqual(self.app.crown_meter_state["levels"], [-13.2, -9.8])
+        self.assertGreater(self.app.crown_last_payload_time, 0.0)
+
+    def test_crown_mode_falls_back_when_feed_stale(self):
+        self.app._handle_control_message({"crown_enabled": True, "mode": "crown"})
+        self.app.crown_stale_after_seconds = 1.0
+        self.app.crown_last_payload_time = time.time() - 10.0
+        self.app.scoreboard = MagicMock()
+
+        self.app._tick_active_mode()
+
+        self.assertEqual(self.app.active_mode, "scoreboard")
+
+    def test_extract_hex_bytes_from_udp_ascii_formats(self):
+        self.assertEqual(self.app._extract_hex_bytes_from_udp_payload(b"7F"), [0x7F])
+        self.assertEqual(self.app._extract_hex_bytes_from_udp_payload(b"0x7F,1A"), [0x7F, 0x1A])
+        self.assertEqual(self.app._extract_hex_bytes_from_udp_payload(b"7F 1A"), [0x7F, 0x1A])
+
+    def test_extract_udp_meter_level_from_hex_byte_index(self):
+        self.app.crown_meter_min_db = -60.0
+        self.app.crown_meter_max_db = 0.0
+        self.app.crown_udp_hex_byte_index = 0
+
+        low = self.app._extract_udp_meter_level(b"00")
+        high = self.app._extract_udp_meter_level(b"FF")
+
+        self.assertEqual(low, -60.0)
+        self.assertEqual(high, 0.0)
+
+    def test_extract_udp_meter_level_uses_selected_byte(self):
+        self.app.crown_meter_min_db = -60.0
+        self.app.crown_meter_max_db = 0.0
+        self.app.crown_udp_hex_byte_index = 1
+
+        level = self.app._extract_udp_meter_level(b"10 80")
+
+        self.assertIsNotNone(level)
+        self.assertGreater(level, -40.0)
+        self.assertLess(level, -20.0)
 
     def test_control_string_switches_mode(self):
         self.app.active_mode = "scoreboard"

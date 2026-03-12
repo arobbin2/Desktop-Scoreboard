@@ -7,7 +7,7 @@ LED Matrix scoreboard driver for Raspberry Pi 5 with MQTT support. Receives scor
 - **MQTT Integration**: Receive real-time scoreboard updates from Node-RED
 - **LED Matrix Support**: Drive RGB LED matrices using rpi-rgb-led-matrix
 - **Flexible Display**: Show both text and structured scoreboard data (teams, scores, status)
-- **Display Modes**: Switch between `scoreboard`, `clock`, `rss` ticker, and `cubs` live game modes at runtime
+- **Display Modes**: Switch between `scoreboard`, `clock`, `rss` ticker, `cubs` live game mode, and an opt-in `crown` meter mode scaffold
 - **Configurable**: YAML-based configuration for MQTT, matrix hardware, and display settings
 - **Mock Mode**: Test without hardware using mock display functions
 - **Graceful Shutdown**: Proper signal handling for clean application termination
@@ -98,7 +98,7 @@ matrix:
   parallel: 1                      # Number of parallel chains
 
 modes:
-  default_mode: scoreboard         # scoreboard | clock | rss | cubs
+  default_mode: scoreboard         # scoreboard | clock | rss | cubs | crown
 
 rss:
   feed_url: https://news.google.com/rss
@@ -109,6 +109,18 @@ cubs:
   team_id: 112                     # Chicago Cubs
   refresh_seconds: 15              # Live game refresh cadence
   off_day_text: "No Cubs Game Today"
+
+crown:
+  enabled: false                   # Keep off until feed is validated
+  meter_topic: scoreboard/crown/meter
+  udp_enabled: true                # Read Crown meter from UDP packet stream
+  udp_bind_host: 0.0.0.0
+  udp_bind_port: 10001
+  udp_hex_byte_index: 0            # Select byte from parsed hex payload
+  meter_min_db: -60.0
+  meter_max_db: 0.0
+  stale_after_seconds: 5.0
+  fallback_to_scoreboard_on_stale: true
 ```
 
 ## Building/Running
@@ -234,6 +246,13 @@ Supported modes:
 - `clock`: Always shows the live clock/weather display
 - `rss`: Shows scrolling headlines from configured RSS/Atom feed
 - `cubs`: Shows current Cubs game score, inning, ball/strike/out count, and base occupancy
+- `crown`: Crown amplifier metering scaffold; requires `crown.enabled: true` before mode switches are accepted
+
+Crown UDP meter payload notes:
+
+- The app accepts either raw UDP bytes or ASCII hex payloads.
+- ASCII examples accepted: `7F`, `0x7F`, `7F 1A`, `7F,1A`.
+- `udp_hex_byte_index` chooses which parsed byte is used for the single meter.
 
 ## Node-RED Integration
 
