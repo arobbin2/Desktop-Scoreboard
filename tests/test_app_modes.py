@@ -150,6 +150,17 @@ class TestAppModes(unittest.TestCase):
         self.assertGreater(level, -40.0)
         self.assertLess(level, -20.0)
 
+    def test_parse_hex_payload_accepts_comma_and_space_formats(self):
+        parsed = self.app._parse_hex_payload("02,19,00,FF")
+        self.assertEqual(parsed, bytes([0x02, 0x19, 0x00, 0xFF]))
+
+        parsed_with_spaces = self.app._parse_hex_payload("02 19 00 FF")
+        self.assertEqual(parsed_with_spaces, bytes([0x02, 0x19, 0x00, 0xFF]))
+
+    def test_parse_hex_payload_rejects_odd_length(self):
+        parsed = self.app._parse_hex_payload("ABC")
+        self.assertEqual(parsed, b"")
+
     def test_control_string_switches_mode(self):
         self.app.active_mode = "scoreboard"
         with patch.object(self.app, "_refresh_rss_if_due"):

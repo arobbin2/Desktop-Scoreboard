@@ -119,6 +119,21 @@ class ScoreboardApp:
         self.crown_udp_enabled = bool(crown_config.get("udp_enabled", True))
         self.crown_udp_bind_host = str(crown_config.get("udp_bind_host", "0.0.0.0")).strip() or "0.0.0.0"
         self.crown_udp_bind_port = self._as_int(crown_config.get("udp_bind_port"), fallback=10001, minimum=1)
+        self.crown_subscribe_enabled = bool(crown_config.get("subscribe_enabled", True))
+        self.crown_subscribe_host = str(crown_config.get("subscribe_host", "10.255.40.23")).strip()
+        self.crown_subscribe_port = self._as_int(crown_config.get("subscribe_port"), fallback=3804, minimum=1)
+        self.crown_subscribe_interval_seconds = self._as_float(
+            crown_config.get("subscribe_interval_seconds"),
+            fallback=2.0,
+            minimum=0.5,
+        )
+        self.crown_subscribe_payload_hex = str(
+            crown_config.get(
+                "subscribe_payload_hex",
+                "02,19,00,00,00,2B,00,33,00,00,00,00,0E,EC,00,10,17,01,01,0F,00,20,05,00,00,00,01,00,00,00,00,33,00,10,17,01,00,00,00,00,00,00,00",
+            )
+        )
+        self.crown_subscribe_payload_bytes = self._parse_hex_payload(self.crown_subscribe_payload_hex)
         self.crown_udp_hex_byte_index = self._as_int(crown_config.get("udp_hex_byte_index"), fallback=0, minimum=0)
         self.crown_meter_min_db = self._as_float(crown_config.get("meter_min_db"), fallback=-60.0)
         self.crown_meter_max_db = self._as_float(crown_config.get("meter_max_db"), fallback=0.0)
@@ -219,6 +234,8 @@ class ScoreboardApp:
         self.crown_last_frame_time = 0.0
         self.crown_udp_socket: Optional[socket.socket] = None
         self.crown_udp_bound_address = ""
+        self.crown_last_subscribe_time = 0.0
+        self.crown_subscribe_send_count = 0
 
         # Set up signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -374,6 +391,7 @@ class ScoreboardApp:
 
         if self.crown_udp_enabled:
             self._ensure_crown_udp_socket()
+            self._maybe_send_crown_subscribe(now)
             self._poll_crown_udp_packets()
 
         if (now - self.crown_last_frame_time) < self.crown_frame_interval_seconds:
@@ -459,6 +477,41 @@ class ScoreboardApp:
             }
             self.crown_last_payload_time = now
 
+    def _maybe_send_crown_subscribe(self, now: float, force: bool = False) -> None:
+        """Send Crown subscribe packet from the same bound UDP socket used for listening."""
+        if not self.crown_subscribe_enabled:
+            return
+
+        if self.crown_udp_socket is None:
+            return
+
+        if not self.crown_subscribe_host or not self.crown_subscribe_payload_bytes:
+            return
+
+        if (not force) and self.crown_last_subscribe_time > 0:
+            elapsed = now - self.crown_last_subscribe_time
+            if elapsed < self.crown_subscribe_interval_seconds:
+                return
+
+        try:
+            self.crown_udp_socket.sendto(
+                self.crown_subscribe_payload_bytes,
+                (self.crown_subscribe_host, self.crown_subscribe_port),
+            )
+            self.crown_last_subscribe_time = now
+            self.crown_subscribe_send_count += 1
+            if self.crown_subscribe_send_count == 1 or force:
+                logger.info(
+                    "Sent Crown subscribe packet to "
+                    f"{self.crown_subscribe_host}:{self.crown_subscribe_port} "
+                    f"from local UDP {self.crown_udp_bind_port}"
+                )
+        except OSError as exc:
+            logger.warning(
+                "Unable to send Crown subscribe packet to "
+                f"{self.crown_subscribe_host}:{self.crown_subscribe_port}: {exc}"
+            )
+
     def _extract_udp_meter_level(self, payload: bytes) -> Optional[float]:
         """Extract a single meter level from UDP payload bytes or ASCII hex text."""
         hex_bytes = self._extract_hex_bytes_from_udp_payload(payload)
@@ -510,6 +563,29 @@ class ScoreboardApp:
                     pass
 
         return [int(value) & 0xFF for value in payload]
+
+    @staticmethod
+    def _parse_hex_payload(raw_value: str) -> bytes:
+        """Parse a comma/space-delimited hex string into bytes."""
+        text = str(raw_value).strip()
+        if not text:
+            return b""
+
+        normalized = text.replace("0x", "").replace("0X", "")
+        normalized = normalized.replace(",", " ").replace(";", " ")
+        compact = "".join(normalized.split())
+        if not compact:
+            return b""
+
+        if len(compact) % 2 != 0:
+            logger.warning("Invalid crown.subscribe_payload_hex length; expected even number of hex chars")
+            return b""
+
+        try:
+            return bytes.fromhex(compact)
+        except ValueError:
+            logger.warning("Invalid crown.subscribe_payload_hex; unable to parse hex bytes")
+            return b""
 
     @staticmethod
     def _format_crown_levels_text(levels: List[float]) -> str:
@@ -941,6 +1017,8 @@ class ScoreboardApp:
                 minimum=0.5,
             )
 
+        crown_subscribe_now = bool(payload.get("crown_subscribe_now", False))
+
         mode_request = payload.get("mode")
         if mode_request is None and payload.get("action") == "set_mode":
             mode_request = payload.get("value")
@@ -974,6 +1052,9 @@ class ScoreboardApp:
         if bool(payload.get("cubs_refresh_now", False)):
             self._refresh_cubs_if_due(now=time.time(), force=True)
 
+        if crown_subscribe_now:
+            self._maybe_send_crown_subscribe(now=time.time(), force=True)
+
         if bool(payload.get("crown_reset", False)):
             self.crown_meter_state = {
                 "levels": [],
@@ -983,6 +1064,7 @@ class ScoreboardApp:
             self.crown_last_payload_time = 0.0
             self.crown_last_render_key = ""
             self.crown_last_frame_time = 0.0
+            self.crown_last_subscribe_time = 0.0
 
     def _close_crown_udp_socket(self) -> None:
         """Close UDP socket used by Crown mode."""
@@ -1019,6 +1101,7 @@ class ScoreboardApp:
         if normalized_mode == "crown":
             self.crown_last_render_key = ""
             self.crown_last_frame_time = 0.0
+            self.crown_last_subscribe_time = 0.0
 
         logger.info(
             f"Mode changed from '{previous_mode}' to '{normalized_mode}'"
