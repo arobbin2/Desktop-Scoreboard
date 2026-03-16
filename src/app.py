@@ -192,6 +192,9 @@ class ScoreboardApp:
             fallback=6,
             minimum=0,
         )
+        self.crown_use_london_meter_scaling = bool(
+            crown_config.get("use_london_meter_scaling", False)
+        )
         self.crown_frame_interval_seconds = self._as_float(
             crown_config.get("frame_interval_seconds"),
             fallback=0.1,
@@ -1267,10 +1270,10 @@ class ScoreboardApp:
         if datatype in {6, 7}:
             return max(self.crown_meter_min_db, min(self.crown_meter_max_db, raw_value))
 
-        # Audio Architect meter parameters are commonly signed 32-bit raw values
-        # in 0.0001 dB units (dB = raw / 10000), with nominal range
-        # -800000..400000 mapping to -80..+40 dB.
-        if datatype == 4 and -800000.0 <= raw_value <= 400000.0:
+        # Optional Soundweb London DI meter conversion for signed 32-bit raw values
+        # in 0.0001 dB units (dB = raw / 10000). Keep disabled for Crown streams
+        # unless explicitly requested.
+        if self.crown_use_london_meter_scaling and datatype == 4 and -800000.0 <= raw_value <= 400000.0:
             mapped_from_raw = raw_value / 10000.0
             return max(self.crown_meter_min_db, min(self.crown_meter_max_db, mapped_from_raw))
 

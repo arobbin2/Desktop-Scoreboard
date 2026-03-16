@@ -304,6 +304,7 @@ class TestAppModes(unittest.TestCase):
         """Signed 32-bit meter raw should convert with dB = raw / 10000."""
         self.app.crown_meter_min_db = -60.0
         self.app.crown_meter_max_db = 0.0
+        self.app.crown_use_london_meter_scaling = True
 
         mapped = self.app._map_hiqnet_raw_to_meter_db(-148000.0, 4)
         self.assertAlmostEqual(mapped, -14.8, places=3)
