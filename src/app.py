@@ -215,6 +215,11 @@ class ScoreboardApp:
             fallback=0.01,
             minimum=0.0,
         )
+        self.crown_udp_stats_log_interval_seconds = self._as_float(
+            crown_config.get("udp_stats_log_interval_seconds"),
+            fallback=2.0,
+            minimum=0.5,
+        )
         self.crown_target_param_id = self._as_int(
             crown_config.get("target_param_id"),
             fallback=6,
@@ -325,7 +330,9 @@ class ScoreboardApp:
         self.crown_tcp_sequence = 1
         self.crown_subscribe_all_log_emitted = False
         self.crown_udp_packet_log_counter = 0
+        self.crown_udp_parsed_log_counter = 0
         self.crown_udp_unparsed_log_counter = 0
+        self.crown_last_udp_stats_log_time = 0.0
         self.crown_marker_last_raw_by_channel: Dict[int, float] = {}
         self.crown_marker_last_raw_by_signature: Dict[Tuple[int, int], float] = {}
         self.crown_marker_activity_by_signature: Dict[Tuple[int, int], float] = {}
@@ -495,6 +502,7 @@ class ScoreboardApp:
             self._maybe_send_crown_subscribe(now)
             self._maybe_send_crown_tcp_keepalive(now)
             self._poll_crown_udp_packets()
+            self._maybe_log_crown_udp_stats(now)
 
         if (now - self.crown_last_frame_time) < self.crown_frame_interval_seconds:
             return
@@ -587,6 +595,25 @@ class ScoreboardApp:
                 "status_text": "udp-live",
             }
             self.crown_last_payload_time = now
+            self.crown_udp_parsed_log_counter += 1
+
+    def _maybe_log_crown_udp_stats(self, now: float) -> None:
+        """Emit periodic Crown UDP ingest stats at INFO for field diagnostics."""
+        if (now - self.crown_last_udp_stats_log_time) < self.crown_udp_stats_log_interval_seconds:
+            return
+
+        self.crown_last_udp_stats_log_time = now
+        last_age = -1.0
+        if self.crown_last_payload_time > 0:
+            last_age = now - self.crown_last_payload_time
+
+        logger.info(
+            "Crown UDP stats: packets=%d parsed=%d unparsed=%d last_payload_age=%.2fs",
+            self.crown_udp_packet_log_counter,
+            self.crown_udp_parsed_log_counter,
+            self.crown_udp_unparsed_log_counter,
+            last_age,
+        )
 
     def _maybe_send_crown_subscribe(self, now: float, force: bool = False) -> None:
         """Send Crown subscribe packet using configured transport (udp|tcp)."""
