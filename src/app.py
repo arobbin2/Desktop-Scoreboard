@@ -234,6 +234,9 @@ class ScoreboardApp:
         self.crown_prefer_hiqnet_frame_over_marker = bool(
             crown_config.get("prefer_hiqnet_frame_over_marker", False)
         )
+        self.crown_allow_marker_fallback = bool(
+            crown_config.get("allow_marker_fallback", True)
+        )
         self.crown_udp_stats_log_interval_seconds = self._as_float(
             crown_config.get("udp_stats_log_interval_seconds"),
             fallback=2.0,
@@ -352,6 +355,13 @@ class ScoreboardApp:
         self.crown_udp_parsed_log_counter = 0
         self.crown_udp_unparsed_log_counter = 0
         self.crown_last_udp_stats_log_time = 0.0
+        self.crown_decode_source_counts: Dict[str, int] = {
+            "short": 0,
+            "probe": 0,
+            "marker": 0,
+            "frame": 0,
+            "none": 0,
+        }
         self.crown_marker_last_raw_by_channel: Dict[int, float] = {}
         self.crown_marker_last_raw_by_signature: Dict[Tuple[int, int], float] = {}
         self.crown_marker_activity_by_signature: Dict[Tuple[int, int], float] = {}
@@ -627,11 +637,16 @@ class ScoreboardApp:
             last_age = now - self.crown_last_payload_time
 
         logger.info(
-            "Crown UDP stats: packets=%d parsed=%d unparsed=%d subscribe_tx=%d last_payload_age=%.2fs",
+            "Crown UDP stats: packets=%d parsed=%d unparsed=%d subscribe_tx=%d src(short=%d probe=%d frame=%d marker=%d none=%d) last_payload_age=%.2fs",
             self.crown_udp_packet_log_counter,
             self.crown_udp_parsed_log_counter,
             self.crown_udp_unparsed_log_counter,
             self.crown_subscribe_send_count,
+            self.crown_decode_source_counts.get("short", 0),
+            self.crown_decode_source_counts.get("probe", 0),
+            self.crown_decode_source_counts.get("frame", 0),
+            self.crown_decode_source_counts.get("marker", 0),
+            self.crown_decode_source_counts.get("none", 0),
             last_age,
         )
 
@@ -1045,18 +1060,22 @@ class ScoreboardApp:
 
             if raw_short == raw_short and -200.0 <= raw_short <= 50.0:
                 logger.debug("Crown UDP raw FLOAT32 fallback: %.3f", raw_short)
+                self.crown_decode_source_counts["short"] = self.crown_decode_source_counts.get("short", 0) + 1
                 return max(self.crown_meter_min_db, min(self.crown_meter_max_db, raw_short))
 
             logger.debug("Crown UDP short payload ignored: len=4 value=%r", payload)
+            self.crown_decode_source_counts["none"] = self.crown_decode_source_counts.get("none", 0) + 1
             return None
 
         probe_level = self._probe_udp_float_offsets(payload)
         if probe_level is not None:
+            self.crown_decode_source_counts["probe"] = self.crown_decode_source_counts.get("probe", 0) + 1
             return probe_level
 
-        if not self.crown_prefer_hiqnet_frame_over_marker:
+        if (not self.crown_prefer_hiqnet_frame_over_marker) and self.crown_allow_marker_fallback:
             marker_level = self._extract_marker_float_level(payload)
             if marker_level is not None:
+                self.crown_decode_source_counts["marker"] = self.crown_decode_source_counts.get("marker", 0) + 1
                 return marker_level
 
         # Try as a direct frame first.
@@ -1077,6 +1096,7 @@ class ScoreboardApp:
                     self.crown_last_marker_mapped_level,
                 )
                 return None
+            self.crown_decode_source_counts["frame"] = self.crown_decode_source_counts.get("frame", 0) + 1
             return direct_level
 
         # Some devices batch/encapsulate multiple frames in one datagram; scan for version byte.
@@ -1100,15 +1120,18 @@ class ScoreboardApp:
                         self.crown_last_marker_mapped_level,
                     )
                     continue
+                self.crown_decode_source_counts["frame"] = self.crown_decode_source_counts.get("frame", 0) + 1
                 return embedded_level
 
-        if self.crown_prefer_hiqnet_frame_over_marker:
+        if self.crown_prefer_hiqnet_frame_over_marker and self.crown_allow_marker_fallback:
             marker_level = self._extract_marker_float_level(payload)
             if marker_level is not None:
+                self.crown_decode_source_counts["marker"] = self.crown_decode_source_counts.get("marker", 0) + 1
                 return marker_level
 
         if len(payload) < 34:
             logger.debug("Crown UDP short payload ignored: len=%d", len(payload))
+        self.crown_decode_source_counts["none"] = self.crown_decode_source_counts.get("none", 0) + 1
         return None
 
     def _probe_udp_float_offsets(self, payload: bytes) -> Optional[float]:
