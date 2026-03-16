@@ -176,7 +176,7 @@ class ScoreboardApp:
         self.crown_marker_channel_id = self._as_int(
             crown_config.get("marker_channel_id"),
             fallback=1,
-            minimum=1,
+            minimum=0,
         )
         self.crown_marker_offset_db = self._as_float(
             crown_config.get("marker_offset_db"),
@@ -285,6 +285,7 @@ class ScoreboardApp:
         self.crown_subscribe_all_log_emitted = False
         self.crown_udp_packet_log_counter = 0
         self.crown_udp_unparsed_log_counter = 0
+        self.crown_marker_last_raw_by_channel: Dict[int, float] = {}
 
         # Set up signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -920,7 +921,7 @@ class ScoreboardApp:
             if (marker + 2) >= len(payload):
                 break
             channel_id = int(payload[marker + 2])
-            if channel_id != self.crown_marker_channel_id:
+            if self.crown_marker_channel_id > 0 and channel_id != self.crown_marker_channel_id:
                 search = marker + 1
                 continue
 
@@ -948,8 +949,23 @@ class ScoreboardApp:
         if not candidates:
             return None
 
-        # Pick the hottest value for the configured channel in this payload.
-        selected = max(candidates, key=lambda item: item[2])
+        if self.crown_marker_channel_id > 0:
+            # Fixed channel mode: pick hottest value for configured channel.
+            selected = max(candidates, key=lambda item: item[2])
+        else:
+            # Auto mode: pick channel with highest short-term movement to surface active meter.
+            selected = candidates[0]
+            best_score = -1.0
+            for channel_id, raw, mapped in candidates:
+                previous = self.crown_marker_last_raw_by_channel.get(channel_id)
+                score = abs(raw - previous) if previous is not None else 0.0
+                if score > best_score:
+                    best_score = score
+                    selected = (channel_id, raw, mapped)
+
+            for channel_id, raw, _mapped in candidates:
+                self.crown_marker_last_raw_by_channel[channel_id] = raw
+
         logger.debug(
             "Crown marker FLOAT32: ch=%d raw=%.3f mapped=%.3f",
             selected[0],
