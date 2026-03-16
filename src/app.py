@@ -764,19 +764,22 @@ class ScoreboardApp:
             if elapsed < self.crown_subscribe_interval_seconds:
                 return
 
-        payload_bytes = self._resolve_crown_subscribe_payload()
-        if not payload_bytes:
+        payloads = self._resolve_crown_subscribe_payloads()
+        if not payloads:
             return
 
         sent = False
-        if self.crown_subscribe_transport == "tcp":
-            sent = self._send_crown_subscribe_tcp(payload_bytes)
-        else:
-            sent = self._send_crown_subscribe_udp(payload_bytes)
+        for payload_bytes in payloads:
+            payload_sent = False
+            if self.crown_subscribe_transport == "tcp":
+                payload_sent = self._send_crown_subscribe_tcp(payload_bytes)
+            else:
+                payload_sent = self._send_crown_subscribe_udp(payload_bytes)
+            sent = sent or payload_sent
 
         if sent:
             self.crown_last_subscribe_time = now
-            self.crown_subscribe_send_count += 1
+            self.crown_subscribe_send_count += len(payloads)
             if self.crown_subscribe_send_count % 10 == 1:
                 logger.info(
                     "Crown subscribe tx: count=%d transport=%s host=%s port=%d",
@@ -800,10 +803,11 @@ class ScoreboardApp:
                 )
                 if last_age >= self.crown_subscribe_legacy_fallback_after_seconds:
                     fallback_sent = False
-                    if self.crown_subscribe_transport == "tcp":
-                        fallback_sent = self._send_crown_subscribe_tcp(self.crown_subscribe_payload_bytes)
-                    else:
-                        fallback_sent = self._send_crown_subscribe_udp(self.crown_subscribe_payload_bytes)
+                    for payload_bytes in self._resolve_legacy_crown_subscribe_payloads():
+                        if self.crown_subscribe_transport == "tcp":
+                            fallback_sent = self._send_crown_subscribe_tcp(payload_bytes) or fallback_sent
+                        else:
+                            fallback_sent = self._send_crown_subscribe_udp(payload_bytes) or fallback_sent
                     if fallback_sent:
                         logger.info(
                             "Crown subscribe fallback tx: legacy payload sent after %.2fs without fresh payload",
@@ -819,15 +823,12 @@ class ScoreboardApp:
                     else (self.crown_subscribe_tcp_assist_after_seconds + 1.0)
                 )
                 if last_age >= self.crown_subscribe_tcp_assist_after_seconds:
-                    tcp_payload = payload_bytes
-                    if (
-                        self.crown_subscribe_use_subscribe_all_sensor
-                        and self.crown_subscribe_payload_bytes
-                    ):
-                        # Try both sensor-subscribe and legacy payload shapes over TCP.
-                        tcp_payload = self.crown_subscribe_payload_bytes
-
-                    tcp_sent = self._send_crown_subscribe_tcp(tcp_payload)
+                    tcp_sent = False
+                    assist_payloads = self._resolve_legacy_crown_subscribe_payloads()
+                    if not assist_payloads:
+                        assist_payloads = payloads
+                    for assist_payload in assist_payloads:
+                        tcp_sent = self._send_crown_subscribe_tcp(assist_payload) or tcp_sent
                     if tcp_sent:
                         logger.info(
                             "Crown subscribe tcp-assist tx: payload sent after %.2fs without fresh payload",
@@ -1073,23 +1074,70 @@ class ScoreboardApp:
         serial[-2:] = source_node.to_bytes(2, "big")
         return bytes(serial)
 
-    def _resolve_crown_subscribe_payload(self) -> bytes:
-        """Return configured payload or generated SubscribeAll-sensor payload."""
-        if self.crown_subscribe_use_subscribe_all_sensor:
-            generated = self._build_subscribe_all_sensor_payload()
-            if generated:
-                return generated
-        return self.crown_subscribe_payload_bytes
+    def _resolve_crown_subscribe_payloads(self) -> List[bytes]:
+        """Return payloads for the configured Crown object target range."""
+        payloads: List[bytes] = []
+        for object_id in self._crown_target_object_ids():
+            if self.crown_subscribe_use_subscribe_all_sensor:
+                generated = self._build_subscribe_all_sensor_payload(object_id)
+                if generated:
+                    payloads.append(generated)
+                    continue
+            legacy_payload = self._build_legacy_crown_subscribe_payload(object_id)
+            if legacy_payload:
+                payloads.append(legacy_payload)
+        return payloads
 
-    def _build_subscribe_all_sensor_payload(self) -> bytes:
+    def _resolve_legacy_crown_subscribe_payloads(self) -> List[bytes]:
+        """Return legacy subscribe payloads across the configured target object range."""
+        payloads: List[bytes] = []
+        for object_id in self._crown_target_object_ids():
+            payload = self._build_legacy_crown_subscribe_payload(object_id)
+            if payload:
+                payloads.append(payload)
+        return payloads
+
+    def _crown_target_object_ids(self) -> List[int]:
+        """Return the configured sequence of Crown object IDs to subscribe to."""
+        if self.crown_target_object_id is None:
+            return []
+        if self.crown_display_channel_count <= 1:
+            return [self.crown_target_object_id]
+
+        base = int(self.crown_target_object_id & 0xFFFFFF00)
+        start = int(self.crown_target_object_id & 0xFF)
+        return [base | channel_id for channel_id in range(start, start + self.crown_display_channel_count)]
+
+    def _build_legacy_crown_subscribe_payload(self, object_id: int) -> bytes:
+        """Clone configured legacy subscribe payload with destination object rewritten."""
+        base = self.crown_subscribe_payload_bytes
+        if len(base) < 18:
+            return b""
+
+        mutated = bytearray(base)
+        target_bytes = int(object_id).to_bytes(4, "big")
+        original = int(self.crown_target_object_id or object_id).to_bytes(4, "big")
+        # Rewrite destination object in header.
+        mutated[14:18] = target_bytes
+        # Rewrite any embedded object-id references in the payload body.
+        scan = 18
+        while scan <= (len(mutated) - 4):
+            if bytes(mutated[scan : scan + 4]) == original:
+                mutated[scan : scan + 4] = target_bytes
+                scan += 4
+                continue
+            scan += 1
+        return bytes(mutated)
+
+    def _build_subscribe_all_sensor_payload(self, object_id: int) -> bytes:
         """Build HiQnet ParamSubscribeAll (0x0113) from configured source/destination addresses."""
         base = self.crown_subscribe_payload_bytes
         if len(base) < 25 or base[0] != 0x02:
             return b""
 
         source_address = bytes(base[6:12])
-        destination_address = bytes(base[12:18])
-        destination_vd_object = bytes(base[14:18])
+        destination_address = bytes(base[12:14]) + int(object_id).to_bytes(4, "big")
+        destination_vd_object = int(object_id).to_bytes(4, "big")
 
         frame = bytearray()
         frame.extend([0x02, 0x19])
