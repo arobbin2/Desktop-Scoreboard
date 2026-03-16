@@ -1445,6 +1445,18 @@ class ScoreboardApp:
         if msg_id != 0x0100:
             return None
 
+        object_id = int.from_bytes(payload[offset + 14 : offset + 18], "big")
+        channel_id = int(object_id & 0xFF)
+        if self.crown_target_object_id is not None and object_id != 0:
+            if self.crown_display_channel_count > 1:
+                target_base = int(self.crown_target_object_id & 0xFFFFFF00)
+                target_start = int(self.crown_target_object_id & 0xFF)
+                target_end = target_start + self.crown_display_channel_count - 1
+                if ((object_id & 0xFFFFFF00) != target_base) or not (target_start <= channel_id <= target_end):
+                    return None
+            elif object_id != self.crown_target_object_id:
+                return None
+
         message_len = struct.unpack(">I", payload[offset + 2 : offset + 6])[0]
         frame_end = min(len(payload), offset + max(header_len, message_len))
 
@@ -1474,8 +1486,10 @@ class ScoreboardApp:
                 continue
 
             meter_value = self._map_hiqnet_raw_to_meter_db(raw, datatype)
+            self._apply_crown_channel_level(channel_id, meter_value)
             logger.debug(
-                "Crown UDP MultiParamSet: param_id=%d datatype=%d raw=%.6f mapped=%.3f",
+                "Crown UDP MultiParamSet: obj=0x%08X param_id=%d datatype=%d raw=%.6f mapped=%.3f",
+                object_id,
                 param_id,
                 datatype,
                 raw,
