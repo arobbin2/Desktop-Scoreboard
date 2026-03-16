@@ -161,6 +161,14 @@ class ScoreboardApp:
             fallback=1,
             minimum=0,
         )
+        self.crown_subscribe_legacy_fallback_on_stale = bool(
+            crown_config.get("subscribe_legacy_fallback_on_stale", True)
+        )
+        self.crown_subscribe_legacy_fallback_after_seconds = self._as_float(
+            crown_config.get("subscribe_legacy_fallback_after_seconds"),
+            fallback=2.5,
+            minimum=0.5,
+        )
         inferred_source_node = self._infer_source_node_from_subscribe_payload(self.crown_subscribe_payload_bytes)
         self.crown_source_node = self._as_int(crown_config.get("source_node"), fallback=inferred_source_node, minimum=1)
         inferred_target_object_id = self._infer_target_object_id_from_subscribe_payload(
@@ -650,6 +658,30 @@ class ScoreboardApp:
                     self.crown_subscribe_host,
                     self.crown_subscribe_port,
                 )
+
+            # Some Crown devices only respond reliably to the original 0x0101-style
+            # subscribe payload. If SubscribeAll appears stale, also send legacy.
+            if (
+                self.crown_subscribe_use_subscribe_all_sensor
+                and self.crown_subscribe_legacy_fallback_on_stale
+                and self.crown_subscribe_payload_bytes
+            ):
+                last_age = (
+                    now - self.crown_last_payload_time
+                    if self.crown_last_payload_time > 0
+                    else (self.crown_subscribe_legacy_fallback_after_seconds + 1.0)
+                )
+                if last_age >= self.crown_subscribe_legacy_fallback_after_seconds:
+                    fallback_sent = False
+                    if self.crown_subscribe_transport == "tcp":
+                        fallback_sent = self._send_crown_subscribe_tcp(self.crown_subscribe_payload_bytes)
+                    else:
+                        fallback_sent = self._send_crown_subscribe_udp(self.crown_subscribe_payload_bytes)
+                    if fallback_sent:
+                        logger.info(
+                            "Crown subscribe fallback tx: legacy payload sent after %.2fs without fresh payload",
+                            last_age,
+                        )
 
     def _send_crown_subscribe_udp(self, payload_bytes: bytes) -> bool:
         """Send subscribe payload over UDP from the bound listener socket."""
