@@ -163,6 +163,13 @@ class ScoreboardApp:
         )
         inferred_source_node = self._infer_source_node_from_subscribe_payload(self.crown_subscribe_payload_bytes)
         self.crown_source_node = self._as_int(crown_config.get("source_node"), fallback=inferred_source_node, minimum=1)
+        inferred_target_object_id = self._infer_target_object_id_from_subscribe_payload(
+            self.crown_subscribe_payload_bytes
+        )
+        self.crown_target_object_id = self._parse_hiqnet_object_id(
+            crown_config.get("target_object_id"),
+            fallback=inferred_target_object_id,
+        )
         self.crown_tcp_keepalive_interval_seconds = self._as_float(
             crown_config.get("tcp_keepalive_interval_seconds"),
             fallback=5.0,
@@ -1057,47 +1064,59 @@ class ScoreboardApp:
 
         search = 0
         candidates: List[Tuple[int, int, float, float]] = []
-        while True:
-            marker = payload.find(b"\x10\x17", search)
-            if marker < 0:
-                break
+        marker_patterns: List[bytes] = []
+        if self.crown_target_object_id is not None:
+            marker_patterns.append(self.crown_target_object_id.to_bytes(4, "big"))
+        marker_patterns.append(b"\x10\x17")
 
-            if (marker + 2) >= len(payload):
-                break
-            channel_id = int(payload[marker + 2])
-            if self.crown_marker_channel_id > 0 and channel_id != self.crown_marker_channel_id:
-                search = marker + 1
-                continue
-
-            # Search for all 0B 06 fields near channel marker and parse following big-endian float.
-            end = min(len(payload), marker + 128)
-            field_search = marker
+        for marker_bytes in marker_patterns:
+            search = 0
             while True:
-                field = payload.find(b"\x0b\x06", field_search, end)
-                if field == -1:
+                marker = payload.find(marker_bytes, search)
+                if marker < 0:
                     break
 
-                field_search = field + 1
-                if (field + 6) > len(payload):
+                if (marker + len(marker_bytes)) >= len(payload):
+                    break
+
+                if len(marker_bytes) == 4:
+                    channel_id = int(payload[marker + 3])
+                else:
+                    channel_id = int(payload[marker + 2])
+
+                if self.crown_marker_channel_id > 0 and channel_id != self.crown_marker_channel_id:
+                    search = marker + 1
                     continue
 
-                try:
-                    raw = float(struct.unpack(">f", payload[field + 2 : field + 6])[0])
-                except (struct.error, ValueError, OverflowError):
-                    raw = float("nan")
+                # Search for all 0B 06 fields near channel marker and parse following big-endian float.
+                end = min(len(payload), marker + 128)
+                field_search = marker
+                while True:
+                    field = payload.find(b"\x0b\x06", field_search, end)
+                    if field == -1:
+                        break
 
-                if raw == raw and -200.0 <= raw <= 50.0:
-                    # Many Crown marker values are in an absolute scale (~41..48).
-                    # Convert to display dBFS-like scale using configurable offset.
-                    mapped_source = raw
-                    if raw > self.crown_meter_max_db:
-                        mapped_source = (raw - self.crown_marker_offset_db) * self.crown_marker_scale
+                    field_search = field + 1
+                    if (field + 6) > len(payload):
+                        continue
 
-                    mapped = max(self.crown_meter_min_db, min(self.crown_meter_max_db, mapped_source))
-                    signature = field - marker
-                    candidates.append((channel_id, signature, raw, mapped))
+                    try:
+                        raw = float(struct.unpack(">f", payload[field + 2 : field + 6])[0])
+                    except (struct.error, ValueError, OverflowError):
+                        raw = float("nan")
 
-            search = marker + 1
+                    if raw == raw and -200.0 <= raw <= 50.0:
+                        # Many Crown marker values are in an absolute scale (~41..48).
+                        # Convert to display dBFS-like scale using configurable offset.
+                        mapped_source = raw
+                        if raw > self.crown_meter_max_db:
+                            mapped_source = (raw - self.crown_marker_offset_db) * self.crown_marker_scale
+
+                        mapped = max(self.crown_meter_min_db, min(self.crown_meter_max_db, mapped_source))
+                        signature = field - marker
+                        candidates.append((channel_id, signature, raw, mapped))
+
+                search = marker + 1
 
         if not candidates:
             return None
@@ -1239,6 +1258,9 @@ class ScoreboardApp:
         p += 2  # count/reserved
         object_id = int.from_bytes(payload[p : p + 4], "big")
         p += 4
+
+        if self.crown_target_object_id is not None and object_id != self.crown_target_object_id:
+            return None
 
         # Fast path for observed Crown 0x0101 layout: look for exact tuple marker
         # [param_id:2][datatype:1][value:n]. This avoids misalignment issues in
@@ -1546,6 +1568,43 @@ class ScoreboardApp:
         if len(payload) >= 8 and payload[0] == 0x02 and payload[1] >= 0x19:
             return int.from_bytes(payload[6:8], "big") or 51
         return 51
+
+    @staticmethod
+    def _infer_target_object_id_from_subscribe_payload(payload: bytes) -> Optional[int]:
+        """Infer destination HiQnet object ID from subscribe payload bytes."""
+        if len(payload) >= 18 and payload[0] == 0x02 and payload[1] >= 0x19:
+            return int.from_bytes(payload[14:18], "big")
+        return None
+
+    @staticmethod
+    def _parse_hiqnet_object_id(value: Any, fallback: Optional[int] = None) -> Optional[int]:
+        """Parse object ID from int, hex string, or dotted form like '16.23.1'."""
+        if value is None:
+            return fallback
+
+        if isinstance(value, int):
+            return value if value >= 0 else fallback
+
+        text = str(value).strip()
+        if not text:
+            return fallback
+
+        parts = text.split(".")
+        if len(parts) == 3:
+            try:
+                a = int(parts[0], 10)
+                b = int(parts[1], 10)
+                c = int(parts[2], 10)
+            except ValueError:
+                return fallback
+            if not (0 <= a <= 255 and 0 <= b <= 255 and 0 <= c <= 255):
+                return fallback
+            return (a << 16) | (b << 8) | c
+
+        try:
+            return int(text, 0)
+        except ValueError:
+            return fallback
 
     @staticmethod
     def _format_crown_levels_text(levels: List[float]) -> str:
