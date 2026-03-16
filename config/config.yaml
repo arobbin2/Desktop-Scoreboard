@@ -96,8 +96,8 @@ crown:
   subscribe_interval_seconds: 2.0
   subscribe_payload_hex: "02,19,00,00,00,2B,00,33,00,00,00,00,0E,EC,00,10,17,01,01,0F,00,20,05,00,00,00,01,00,00,00,00,33,00,10,17,01,00,00,00,00,00,00,00"
   target_object_id: "16.23.1"  # HiQnet object to decode (matches 0x00101701)
-  subscribe_use_subscribe_all_sensor: false
-  subscribe_sensor_change_type: 2
+  subscribe_use_subscribe_all_sensor: true
+  subscribe_sensor_change_type: 0
   subscribe_sensor_rate_ms: 50
   subscribe_initial_update: 1
   udp_hex_byte_index: 0  # Which parsed hex byte maps to this single meter

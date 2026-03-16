@@ -608,10 +608,11 @@ class ScoreboardApp:
             last_age = now - self.crown_last_payload_time
 
         logger.info(
-            "Crown UDP stats: packets=%d parsed=%d unparsed=%d last_payload_age=%.2fs",
+            "Crown UDP stats: packets=%d parsed=%d unparsed=%d subscribe_tx=%d last_payload_age=%.2fs",
             self.crown_udp_packet_log_counter,
             self.crown_udp_parsed_log_counter,
             self.crown_udp_unparsed_log_counter,
+            self.crown_subscribe_send_count,
             last_age,
         )
 
@@ -641,6 +642,14 @@ class ScoreboardApp:
         if sent:
             self.crown_last_subscribe_time = now
             self.crown_subscribe_send_count += 1
+            if self.crown_subscribe_send_count % 10 == 1:
+                logger.info(
+                    "Crown subscribe tx: count=%d transport=%s host=%s port=%d",
+                    self.crown_subscribe_send_count,
+                    self.crown_subscribe_transport,
+                    self.crown_subscribe_host,
+                    self.crown_subscribe_port,
+                )
 
     def _send_crown_subscribe_udp(self, payload_bytes: bytes) -> bool:
         """Send subscribe payload over UDP from the bound listener socket."""
