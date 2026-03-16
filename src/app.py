@@ -187,6 +187,11 @@ class ScoreboardApp:
             fallback=1.0,
             minimum=0.1,
         )
+        self.crown_marker_activity_log_interval_seconds = self._as_float(
+            crown_config.get("marker_activity_log_interval_seconds"),
+            fallback=2.0,
+            minimum=0.5,
+        )
         self.crown_target_param_id = self._as_int(
             crown_config.get("target_param_id"),
             fallback=6,
@@ -300,6 +305,8 @@ class ScoreboardApp:
         self.crown_udp_unparsed_log_counter = 0
         self.crown_marker_last_raw_by_channel: Dict[int, float] = {}
         self.crown_marker_last_raw_by_signature: Dict[Tuple[int, int], float] = {}
+        self.crown_marker_activity_by_signature: Dict[Tuple[int, int], float] = {}
+        self.crown_last_marker_activity_log_time = 0.0
         self.crown_tuple_last_raw_by_key: Dict[Tuple[int, int, int], float] = {}
         self.crown_tuple_activity_by_key: Dict[Tuple[int, int, int], float] = {}
         self.crown_last_marker_mapped_level: Optional[float] = None
@@ -1000,24 +1007,45 @@ class ScoreboardApp:
         if not candidates:
             return None
 
+        # Track short-term activity for each channel/signature so we can identify
+        # which field actually follows program material.
+        for channel_id, signature, raw, _mapped in candidates:
+            key = (channel_id, signature)
+            previous = self.crown_marker_last_raw_by_signature.get(key)
+            delta = abs(raw - previous) if previous is not None else 0.0
+            previous_activity = self.crown_marker_activity_by_signature.get(key, 0.0)
+            activity = (previous_activity * 0.85) + (delta * 0.15)
+            self.crown_marker_last_raw_by_signature[key] = raw
+            self.crown_marker_last_raw_by_channel[channel_id] = raw
+            self.crown_marker_activity_by_signature[key] = activity
+
         if self.crown_marker_channel_id > 0:
-            # Fixed channel mode: pick hottest value for configured channel.
+            # Fixed channel mode: pick hottest mapped value within configured channel.
             selected = max(candidates, key=lambda item: item[3])
         else:
             # Auto mode: pick signature (channel + nearby field offset) with highest
             # short-term movement to surface the live meter field.
-            selected = candidates[0]
-            best_score = -1.0
-            for channel_id, signature, raw, _mapped in candidates:
-                previous = self.crown_marker_last_raw_by_signature.get((channel_id, signature))
-                score = abs(raw - previous) if previous is not None else 0.0
-                if score > best_score:
-                    best_score = score
-                    selected = (channel_id, signature, raw, _mapped)
+            selected = max(
+                candidates,
+                key=lambda item: self.crown_marker_activity_by_signature.get((item[0], item[1]), 0.0),
+            )
 
-            for channel_id, signature, raw, _mapped in candidates:
-                self.crown_marker_last_raw_by_channel[channel_id] = raw
-                self.crown_marker_last_raw_by_signature[(channel_id, signature)] = raw
+        now = time.time()
+        if (now - self.crown_last_marker_activity_log_time) >= self.crown_marker_activity_log_interval_seconds:
+            ranked = sorted(
+                candidates,
+                key=lambda item: self.crown_marker_activity_by_signature.get((item[0], item[1]), 0.0),
+                reverse=True,
+            )
+            top_parts: List[str] = []
+            for channel_id, signature, raw, mapped in ranked[:4]:
+                activity = self.crown_marker_activity_by_signature.get((channel_id, signature), 0.0)
+                top_parts.append(
+                    f"ch={channel_id} sig={signature} raw={raw:.3f} mapped={mapped:.3f} act={activity:.5f}"
+                )
+            if top_parts:
+                logger.debug("Crown marker activity top: %s", " | ".join(top_parts))
+                self.crown_last_marker_activity_log_time = now
 
         logger.debug(
             "Crown marker FLOAT32: ch=%d sig=%d raw=%.3f mapped=%.3f",
