@@ -193,6 +193,20 @@ class LEDScoreboard:
         }
         self._render_single_meter(level_db, label=label, min_db=min_db, max_db=max_db, color=color)
 
+    def display_multi_meter(
+        self,
+        levels_db: List[float],
+        min_db: float = -60.0,
+        max_db: float = 0.0,
+        color: tuple = (0, 255, 255),
+    ) -> None:
+        """Display up to 4 stacked channel meters (C1..C4)."""
+        values = [float(v) for v in levels_db[:4]]
+        self.current_data = {
+            "meter_levels_db": values,
+        }
+        self._render_multi_meter(values, min_db=min_db, max_db=max_db, color=color)
+
     def _render_text(self, text: str, color: tuple = (255, 0, 0)) -> None:
         """Render text to the matrix"""
         if self.matrix is None:
@@ -659,7 +673,6 @@ class LEDScoreboard:
                         fill=color,
                     )
             elif fill_width == 1:
-                # For very low non-zero levels, draw a single pixel instead of a rectangle.
                 draw.point((bar_x + 1, bar_y + (bar_height // 2)), fill=color)
 
             label_text = str(label).strip().upper()[:10] or "METER"
@@ -670,6 +683,70 @@ class LEDScoreboard:
             self.matrix.SetImage(image)
         except Exception as e:
             logger.error(f"Error rendering single meter: {e}")
+
+    def _render_multi_meter(
+        self,
+        levels_db: List[float],
+        min_db: float = -60.0,
+        max_db: float = 0.0,
+        color: tuple = (0, 255, 255),
+    ) -> None:
+        """Render four compact horizontal meters for channel monitoring."""
+        if self.matrix is None:
+            logger.info(f"Mock display multi meter: {levels_db}")
+            return
+
+        try:
+            image = Image.new("RGB", (self.width, self.height), color=(0, 0, 0))
+            draw = ImageDraw.Draw(image)
+
+            try:
+                label_font = ImageFont.truetype(
+                    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                    7,
+                )
+            except OSError:
+                label_font = ImageFont.load_default()
+
+            count = max(1, min(4, len(levels_db)))
+            top_margin = 1
+            row_height = max(6, (self.height - top_margin - 1) // count)
+            label_width = 18
+            meter_left = label_width
+            meter_right = self.width - 2
+            meter_width = max(1, meter_right - meter_left)
+            span = max(0.001, float(max_db - min_db))
+
+            for idx in range(count):
+                level = float(levels_db[idx])
+                clamped = max(min_db, min(max_db, level))
+                normalized = (clamped - min_db) / span
+                fill_width = int(round(normalized * meter_width))
+
+                y = top_margin + (idx * row_height)
+                label = f"C{idx + 1}"
+                draw.text((1, y), label, fill=(255, 255, 255), font=label_font)
+
+                bar_top = y + 1
+                bar_bottom = min(self.height - 1, y + row_height - 2)
+                draw.rectangle(
+                    [(meter_left, bar_top), (meter_right, bar_bottom)],
+                    outline=(40, 40, 40),
+                    fill=(5, 5, 5),
+                )
+                if fill_width > 0:
+                    draw.rectangle(
+                        [
+                            (meter_left + 1, bar_top + 1),
+                            (meter_left + min(fill_width, meter_width) - 1, bar_bottom - 1),
+                        ],
+                        fill=color,
+                    )
+
+            self.matrix.SetImage(image)
+            logger.debug("Rendered multi meter channels")
+        except Exception as e:
+            logger.error(f"Error rendering multi meter: {e}")
 
     def _load_cubs_reference_template(self) -> Optional[Image.Image]:
         """Load the user-provided Cubs PNG as an overlay template for baseball mode."""

@@ -186,6 +186,12 @@ class ScoreboardApp:
             crown_config.get("target_object_id"),
             fallback=inferred_target_object_id,
         )
+        self.crown_display_channel_count = self._as_int(
+            crown_config.get("display_channel_count"),
+            fallback=1,
+            minimum=1,
+        )
+        self.crown_display_channel_count = max(1, min(4, self.crown_display_channel_count))
         self.crown_tcp_keepalive_interval_seconds = self._as_float(
             crown_config.get("tcp_keepalive_interval_seconds"),
             fallback=5.0,
@@ -376,6 +382,11 @@ class ScoreboardApp:
         self.crown_level_window_min: Optional[float] = None
         self.crown_level_window_max: Optional[float] = None
         self.crown_smoothed_level: Optional[float] = None
+        self.crown_smoothed_level_by_channel: Dict[int, float] = {}
+        self.crown_level_by_channel: Dict[int, float] = {}
+        self.crown_level_channel_start = (
+            int(self.crown_target_object_id & 0xFF) if self.crown_target_object_id is not None else 1
+        )
         self.crown_marker_last_raw_by_channel: Dict[int, float] = {}
         self.crown_marker_last_raw_by_signature: Dict[Tuple[int, int], float] = {}
         self.crown_marker_activity_by_signature: Dict[Tuple[int, int], float] = {}
@@ -565,15 +576,41 @@ class ScoreboardApp:
                 render_text = self._format_crown_levels_text(self.crown_meter_state.get("levels") or [])
 
         levels = self.crown_meter_state.get("levels") or []
+        if self.crown_display_channel_count > 1 and self.crown_level_by_channel:
+            channel_levels: List[float] = []
+            for channel_id in range(
+                self.crown_level_channel_start,
+                self.crown_level_channel_start + self.crown_display_channel_count,
+            ):
+                channel_levels.append(
+                    float(self.crown_level_by_channel.get(channel_id, self.crown_meter_min_db))
+                )
+            levels = channel_levels
+
         has_meter_level = len(levels) > 0
         meter_level = float(levels[0]) if has_meter_level else 0.0
-        render_key = f"meter:{meter_level:.2f}" if has_meter_level else f"text:{render_text}"
+        render_key = (
+            "meters:" + ",".join(f"{value:.2f}" for value in levels)
+            if has_meter_level
+            else f"text:{render_text}"
+        )
 
         if render_key == self.crown_last_render_key:
             return
 
         self.crown_last_render_key = render_key
-        if has_meter_level and hasattr(self.scoreboard, "display_single_meter"):
+        if (
+            has_meter_level
+            and self.crown_display_channel_count > 1
+            and hasattr(self.scoreboard, "display_multi_meter")
+        ):
+            self.scoreboard.display_multi_meter(
+                levels,
+                min_db=self.crown_meter_min_db,
+                max_db=self.crown_meter_max_db,
+                color=(0, 255, 255),
+            )
+        elif has_meter_level and hasattr(self.scoreboard, "display_single_meter"):
             self.scoreboard.display_single_meter(
                 meter_level,
                 label="CROWN",
@@ -660,6 +697,23 @@ class ScoreboardApp:
             self.crown_level_window_min = smoothed
         if self.crown_level_window_max is None or smoothed > self.crown_level_window_max:
             self.crown_level_window_max = smoothed
+
+    def _apply_crown_channel_level(self, channel_id: int, level: float) -> None:
+        """Update smoothed level for one Crown channel."""
+        target = float(level)
+        previous = self.crown_smoothed_level_by_channel.get(channel_id)
+        if previous is None or self.crown_meter_smoothing_alpha >= 1.0:
+            smoothed = target
+        elif self.crown_meter_smoothing_alpha <= 0.0:
+            smoothed = previous
+        else:
+            smoothed = (
+                (previous * (1.0 - self.crown_meter_smoothing_alpha))
+                + (target * self.crown_meter_smoothing_alpha)
+            )
+
+        self.crown_smoothed_level_by_channel[channel_id] = smoothed
+        self.crown_level_by_channel[channel_id] = smoothed
 
     def _maybe_log_crown_udp_stats(self, now: float) -> None:
         """Emit periodic Crown UDP ingest stats at INFO for field diagnostics."""
@@ -1447,8 +1501,16 @@ class ScoreboardApp:
         object_id = int.from_bytes(payload[p : p + 4], "big")
         p += 4
 
-        if self.crown_target_object_id is not None and object_id != self.crown_target_object_id:
-            return None
+        channel_id = int(object_id & 0xFF)
+        if self.crown_target_object_id is not None:
+            if self.crown_display_channel_count > 1:
+                target_base = int(self.crown_target_object_id & 0xFFFFFF00)
+                target_start = int(self.crown_target_object_id & 0xFF)
+                target_end = target_start + self.crown_display_channel_count - 1
+                if ((object_id & 0xFFFFFF00) != target_base) or not (target_start <= channel_id <= target_end):
+                    return None
+            elif object_id != self.crown_target_object_id:
+                return None
 
         # Fast path for observed Crown 0x0101 layout: look for exact tuple marker
         # [param_id:2][datatype:1][value:n]. This avoids misalignment issues in
@@ -1572,6 +1634,7 @@ class ScoreboardApp:
                 selected_dtype,
                 selected_value,
             )
+            self._apply_crown_channel_level(channel_id, selected_value)
             return selected_value
 
         candidates: List[Tuple[int, int, float]] = []
@@ -1612,6 +1675,7 @@ class ScoreboardApp:
             selected[1],
             selected[2],
         )
+        self._apply_crown_channel_level(channel_id, selected[2])
         return selected[2]
 
     @staticmethod
