@@ -85,7 +85,7 @@ crown:
   meter_topic: scoreboard/crown/meter
   udp_enabled: true
   udp_bind_host: 0.0.0.0
-  udp_bind_port: 10001
+  udp_bind_port: 3804
   subscribe_enabled: true
   subscribe_host: 10.255.40.23
   subscribe_transport: tcp  # udp (legacy) or tcp (HiQnet guide path)
