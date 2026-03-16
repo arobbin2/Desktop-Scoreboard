@@ -636,8 +636,23 @@ class ScoreboardApp:
         """
         import struct
 
+        # Some devices publish raw FLOAT32 sensor values as 4-byte UDP payloads.
+        if len(payload) == 4:
+            try:
+                raw_short = struct.unpack(">f", payload)[0]
+            except struct.error:
+                raw_short = float("nan")
+
+            if raw_short == raw_short and -200.0 <= raw_short <= 50.0:
+                logger.debug("Crown UDP raw FLOAT32 fallback: %.3f", raw_short)
+                return max(self.crown_meter_min_db, min(self.crown_meter_max_db, raw_short))
+
+            logger.debug("Crown UDP short payload ignored: len=4 value=%r", payload)
+            return None
+
         # Need at least header (25) + num_params (2) + param_id (2) + datatype (1) + value (4).
         if len(payload) < 34:
+            logger.debug("Crown UDP short payload ignored: len=%d", len(payload))
             return None
 
         if payload[0] != 0x02:  # HiQnet version 2
