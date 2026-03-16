@@ -1416,7 +1416,11 @@ class ScoreboardApp:
                 break
 
         if marker_candidates:
-            selected_param = self.crown_target_param_id if self.crown_target_param_id in marker_candidates else ordered_params[0]
+            selected_param = (
+                self.crown_target_param_id
+                if self.crown_target_param_id in marker_candidates
+                else next(iter(marker_candidates.keys()))
+            )
             selected_dtype, selected_value, selected_raw = marker_candidates[selected_param]
 
             # Track tuple movement per object/param/datatype and prefer the
@@ -1465,7 +1469,11 @@ class ScoreboardApp:
                     dynamic_param = candidate_param
                     dynamic_score = activity
 
-            if dynamic_param != selected_param and dynamic_score > (selected_activity * 1.5 + 0.01):
+            if (
+                dynamic_param != selected_param
+                and dynamic_param in marker_candidates
+                and dynamic_score > (selected_activity * 1.5 + 0.01)
+            ):
                 dynamic_dtype, dynamic_value, dynamic_raw = marker_candidates[dynamic_param]
                 logger.debug(
                     "Crown UDP 0x0101 dynamic: obj=0x%08X selected_param=%d activity=%.5f using_param=%d activity=%.5f mapped=%.3f",

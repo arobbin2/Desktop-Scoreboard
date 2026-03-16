@@ -349,6 +349,39 @@ class TestAppModes(unittest.TestCase):
         self.assertAlmostEqual(first, -20.0, places=3)
         self.assertAlmostEqual(second, -10.0, places=3)
 
+    def test_extract_udp_meter_level_0101_handles_missing_target_param(self):
+        """Parser should not crash when target param is absent from 0x0101 tuple set."""
+        import struct
+
+        self.app.crown_meter_min_db = -60.0
+        self.app.crown_meter_max_db = 0.0
+        self.app.crown_target_param_id = 6
+
+        header = bytes([
+            0x02,
+            0x19,
+            0x00, 0x00, 0x00, 0x40,
+            0x00, 0x01,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x33,
+            0x00, 0x10, 0x17, 0x01,
+            0x01, 0x01,
+            0x00, 0x20,
+            0x05,
+            0x00, 0x01,
+        ])
+
+        body = bytes([
+            0x00, 0x00,
+            0x00, 0x10, 0x17, 0x01,
+            0x00, 0x03, 0x06,
+        ]) + struct.pack(">f", -12.0)
+
+        level = self.app._extract_udp_meter_level(header + body)
+
+        self.assertIsNotNone(level)
+        self.assertAlmostEqual(level, -12.0, places=3)
+
     def test_parse_hex_payload_accepts_comma_and_space_formats(self):
         parsed = self.app._parse_hex_payload("02,19,00,FF")
         self.assertEqual(parsed, bytes([0x02, 0x19, 0x00, 0xFF]))
