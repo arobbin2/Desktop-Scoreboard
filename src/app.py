@@ -182,6 +182,11 @@ class ScoreboardApp:
             crown_config.get("marker_offset_db"),
             fallback=48.0,
         )
+        self.crown_marker_scale = self._as_float(
+            crown_config.get("marker_scale"),
+            fallback=1.0,
+            minimum=0.1,
+        )
         self.crown_target_param_id = self._as_int(
             crown_config.get("target_param_id"),
             fallback=6,
@@ -970,7 +975,7 @@ class ScoreboardApp:
                     # Convert to display dBFS-like scale using configurable offset.
                     mapped_source = raw
                     if raw > self.crown_meter_max_db:
-                        mapped_source = raw - self.crown_marker_offset_db
+                        mapped_source = (raw - self.crown_marker_offset_db) * self.crown_marker_scale
 
                     mapped = max(self.crown_meter_min_db, min(self.crown_meter_max_db, mapped_source))
                     candidates.append((channel_id, raw, mapped))

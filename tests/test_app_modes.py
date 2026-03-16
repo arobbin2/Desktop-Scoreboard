@@ -253,6 +253,22 @@ class TestAppModes(unittest.TestCase):
         guarded_level = self.app._extract_udp_meter_level(flat_packet)
         self.assertIsNone(guarded_level)
 
+    def test_extract_marker_float_level_applies_scale(self):
+        """Marker mapping should apply configured scale before dB clamping."""
+        import struct
+
+        self.app.crown_marker_channel_id = 1
+        self.app.crown_marker_offset_db = 48.0
+        self.app.crown_marker_scale = 4.0
+        self.app.crown_meter_min_db = -60.0
+        self.app.crown_meter_max_db = 0.0
+
+        packet = b"\x10\x17\x01\x00\x0b\x06" + struct.pack(">f", 42.244)
+        level = self.app._extract_marker_float_level(packet)
+
+        self.assertIsNotNone(level)
+        self.assertAlmostEqual(level, -23.024, places=3)
+
     def test_parse_hex_payload_accepts_comma_and_space_formats(self):
         parsed = self.app._parse_hex_payload("02,19,00,FF")
         self.assertEqual(parsed, bytes([0x02, 0x19, 0x00, 0xFF]))
