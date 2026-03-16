@@ -219,6 +219,40 @@ class TestAppModes(unittest.TestCase):
         self.assertIsNotNone(level)
         self.assertAlmostEqual(level, -18.5, places=3)
 
+    def test_extract_udp_meter_level_ignores_flat_0101_after_marker(self):
+        """Flat 0x0101 values should not overwrite a recent marker-derived sample."""
+        import struct
+
+        self.app.crown_marker_channel_id = 1
+        self.app.crown_marker_offset_db = 48.0
+
+        marker_packet = b"\x10\x17\x01\x00\x0b\x06" + struct.pack(">f", 42.244)
+        marker_level = self.app._extract_udp_meter_level(marker_packet)
+        self.assertIsNotNone(marker_level)
+
+        header = bytes([
+            0x02,
+            0x19,
+            0x00, 0x00, 0x00, 0x33,
+            0x00, 0x01,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x33,
+            0x00, 0x10, 0x17, 0x01,
+            0x01, 0x01,
+            0x00, 0x20,
+            0x05,
+            0x00, 0x01,
+        ])
+        body = bytes([
+            0x00, 0x00,
+            0x00, 0x10, 0x17, 0x01,
+            0x00, 0x06, 0x06,
+        ]) + struct.pack(">f", 0.0)
+        flat_packet = header + body
+
+        guarded_level = self.app._extract_udp_meter_level(flat_packet)
+        self.assertIsNone(guarded_level)
+
     def test_parse_hex_payload_accepts_comma_and_space_formats(self):
         parsed = self.app._parse_hex_payload("02,19,00,FF")
         self.assertEqual(parsed, bytes([0x02, 0x19, 0x00, 0xFF]))

@@ -291,6 +291,8 @@ class ScoreboardApp:
         self.crown_udp_packet_log_counter = 0
         self.crown_udp_unparsed_log_counter = 0
         self.crown_marker_last_raw_by_channel: Dict[int, float] = {}
+        self.crown_last_marker_mapped_level: Optional[float] = None
+        self.crown_last_marker_level_time = 0.0
 
         # Set up signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -896,6 +898,19 @@ class ScoreboardApp:
         # Try as a direct frame first.
         direct_level = self._extract_hiqnet_level_from_frame(payload, 0)
         if direct_level is not None:
+            # Some streams interleave dynamic marker frames with flat 0x0101=0.000
+            # updates; avoid clobbering a recent active marker sample with zeros.
+            if (
+                abs(direct_level) < 0.001
+                and self.crown_last_marker_mapped_level is not None
+                and (time.time() - self.crown_last_marker_level_time) < 0.3
+            ):
+                logger.debug(
+                    "Crown UDP guard: suppressing flat frame mapped=%.3f after recent marker mapped=%.3f",
+                    direct_level,
+                    self.crown_last_marker_mapped_level,
+                )
+                return None
             return direct_level
 
         # Some devices batch/encapsulate multiple frames in one datagram; scan for version byte.
@@ -906,6 +921,17 @@ class ScoreboardApp:
                 continue
             embedded_level = self._extract_hiqnet_level_from_frame(payload, marker)
             if embedded_level is not None:
+                if (
+                    abs(embedded_level) < 0.001
+                    and self.crown_last_marker_mapped_level is not None
+                    and (time.time() - self.crown_last_marker_level_time) < 0.3
+                ):
+                    logger.debug(
+                        "Crown UDP guard: suppressing flat embedded mapped=%.3f after recent marker mapped=%.3f",
+                        embedded_level,
+                        self.crown_last_marker_mapped_level,
+                    )
+                    continue
                 return embedded_level
 
         if len(payload) < 34:
@@ -977,6 +1003,8 @@ class ScoreboardApp:
             selected[1],
             selected[2],
         )
+        self.crown_last_marker_mapped_level = selected[2]
+        self.crown_last_marker_level_time = time.time()
         return selected[2]
 
     def _extract_hiqnet_level_from_frame(self, payload: bytes, offset: int) -> Optional[float]:
