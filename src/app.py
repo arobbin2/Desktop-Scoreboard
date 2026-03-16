@@ -182,6 +182,11 @@ class ScoreboardApp:
             crown_config.get("marker_offset_db"),
             fallback=48.0,
         )
+        self.crown_target_param_id = self._as_int(
+            crown_config.get("target_param_id"),
+            fallback=6,
+            minimum=0,
+        )
         self.crown_frame_interval_seconds = self._as_float(
             crown_config.get("frame_interval_seconds"),
             fallback=0.1,
@@ -988,6 +993,12 @@ class ScoreboardApp:
             return None
 
         msg_id = struct.unpack(">H", payload[offset + 18 : offset + 20])[0]
+        if msg_id == 0x0101:
+            level_0101 = self._extract_hiqnet_level_from_0101(payload, offset, header_len)
+            if level_0101 is not None:
+                return level_0101
+            return None
+
         if msg_id != 0x0100:
             return None
 
@@ -1030,6 +1041,62 @@ class ScoreboardApp:
             return meter_value
 
         return None
+
+    def _extract_hiqnet_level_from_0101(self, payload: bytes, offset: int, header_len: int) -> Optional[float]:
+        """Parse Crown 0x0101 update frames carrying object + repeated param/type/value tuples."""
+        import struct
+
+        frame_end = len(payload)
+        p = offset + header_len
+        if p + 6 > frame_end:
+            return None
+
+        # Observed structure in Crown UDP samples:
+        #   [2 bytes] count/reserved, [4 bytes] object id,
+        #   then repeated: [2 bytes param id][1 byte type][N bytes value].
+        p += 2  # count/reserved
+        object_id = int.from_bytes(payload[p : p + 4], "big")
+        p += 4
+
+        candidates: List[Tuple[int, int, float]] = []
+        while p + 3 <= frame_end:
+            param_id = int.from_bytes(payload[p : p + 2], "big")
+            datatype = int(payload[p + 2])
+            p += 3
+
+            value_size = self._hiqnet_datatype_size(datatype)
+            if value_size <= 0 or (p + value_size) > frame_end:
+                break
+
+            raw = self._decode_hiqnet_numeric_value(payload[p : p + value_size], datatype)
+            p += value_size
+            if raw is None:
+                continue
+
+            mapped = self._map_hiqnet_raw_to_meter_db(raw, datatype)
+            candidates.append((param_id, datatype, mapped))
+
+        if not candidates:
+            return None
+
+        selected: Optional[Tuple[int, int, float]] = None
+        for item in candidates:
+            if item[0] == self.crown_target_param_id:
+                selected = item
+                break
+        if selected is None:
+            # Fallback preference order if configured ID absent.
+            priority = {6: 0, 4: 1, 3: 2, 1: 3, 0: 4}
+            selected = sorted(candidates, key=lambda item: priority.get(item[0], 99))[0]
+
+        logger.debug(
+            "Crown UDP 0x0101: obj=0x%08X selected_param=%d datatype=%d mapped=%.3f",
+            object_id,
+            selected[0],
+            selected[1],
+            selected[2],
+        )
+        return selected[2]
 
     @staticmethod
     def _hiqnet_datatype_size(datatype: int) -> int:
