@@ -1058,6 +1058,57 @@ class ScoreboardApp:
         object_id = int.from_bytes(payload[p : p + 4], "big")
         p += 4
 
+        # Fast path for observed Crown 0x0101 layout: look for exact tuple marker
+        # [param_id:2][datatype:1][value:n]. This avoids misalignment issues in
+        # mixed-type payloads where optional bytes may appear between tuples.
+        preferred_params = [self.crown_target_param_id, 6, 4, 3, 1, 0]
+        seen: set[int] = set()
+        ordered_params: List[int] = []
+        for param_id in preferred_params:
+            if param_id in seen:
+                continue
+            seen.add(param_id)
+            ordered_params.append(param_id)
+
+        for param_id in ordered_params:
+            # Prefer FLOAT32 first.
+            marker_float = int(param_id).to_bytes(2, "big") + bytes([6])
+            idx = payload.find(marker_float, p, frame_end - 4)
+            if idx != -1 and (idx + 7) <= frame_end:
+                raw_f = self._decode_hiqnet_numeric_value(payload[idx + 3 : idx + 7], 6)
+                if raw_f is not None:
+                    mapped_f = self._map_hiqnet_raw_to_meter_db(raw_f, 6)
+                    logger.debug(
+                        "Crown UDP 0x0101: obj=0x%08X selected_param=%d datatype=%d mapped=%.3f",
+                        object_id,
+                        param_id,
+                        6,
+                        mapped_f,
+                    )
+                    return mapped_f
+
+            # Then try integer/byte datatypes for the same param.
+            for datatype in (5, 4, 3, 2, 1, 0):
+                value_size = self._hiqnet_datatype_size(datatype)
+                if value_size <= 0:
+                    continue
+                marker = int(param_id).to_bytes(2, "big") + bytes([datatype])
+                idx = payload.find(marker, p, frame_end - value_size)
+                if idx == -1 or (idx + 3 + value_size) > frame_end:
+                    continue
+                raw_n = self._decode_hiqnet_numeric_value(payload[idx + 3 : idx + 3 + value_size], datatype)
+                if raw_n is None:
+                    continue
+                mapped_n = self._map_hiqnet_raw_to_meter_db(raw_n, datatype)
+                logger.debug(
+                    "Crown UDP 0x0101: obj=0x%08X selected_param=%d datatype=%d mapped=%.3f",
+                    object_id,
+                    param_id,
+                    datatype,
+                    mapped_n,
+                )
+                return mapped_n
+
         candidates: List[Tuple[int, int, float]] = []
         while p + 3 <= frame_end:
             param_id = int.from_bytes(payload[p : p + 2], "big")
