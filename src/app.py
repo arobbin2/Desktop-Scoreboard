@@ -121,6 +121,10 @@ class ScoreboardApp:
         self.crown_udp_bind_port = self._as_int(crown_config.get("udp_bind_port"), fallback=10001, minimum=1)
         self.crown_subscribe_enabled = bool(crown_config.get("subscribe_enabled", True))
         self.crown_subscribe_host = str(crown_config.get("subscribe_host", "10.255.40.23")).strip()
+        self.crown_subscribe_transport = str(crown_config.get("subscribe_transport", "udp")).strip().lower()
+        if self.crown_subscribe_transport not in {"udp", "tcp"}:
+            logger.warning("Invalid crown.subscribe_transport. Using udp.")
+            self.crown_subscribe_transport = "udp"
         self.crown_subscribe_port = self._as_int(crown_config.get("subscribe_port"), fallback=3804, minimum=1)
         self.crown_subscribe_interval_seconds = self._as_float(
             crown_config.get("subscribe_interval_seconds"),
@@ -480,11 +484,8 @@ class ScoreboardApp:
             self.crown_last_payload_time = now
 
     def _maybe_send_crown_subscribe(self, now: float, force: bool = False) -> None:
-        """Send Crown subscribe packet from the same bound UDP socket used for listening."""
+        """Send Crown subscribe packet using configured transport (udp|tcp)."""
         if not self.crown_subscribe_enabled:
-            return
-
-        if self.crown_udp_socket is None:
             return
 
         if not self.crown_subscribe_host or not self.crown_subscribe_payload_bytes:
@@ -495,24 +496,57 @@ class ScoreboardApp:
             if elapsed < self.crown_subscribe_interval_seconds:
                 return
 
+        sent = False
+        if self.crown_subscribe_transport == "tcp":
+            sent = self._send_crown_subscribe_tcp()
+        else:
+            sent = self._send_crown_subscribe_udp()
+
+        if sent:
+            self.crown_last_subscribe_time = now
+            self.crown_subscribe_send_count += 1
+
+    def _send_crown_subscribe_udp(self) -> bool:
+        """Send subscribe payload over UDP from the bound listener socket."""
+        if self.crown_udp_socket is None:
+            return False
+
         try:
             self.crown_udp_socket.sendto(
                 self.crown_subscribe_payload_bytes,
                 (self.crown_subscribe_host, self.crown_subscribe_port),
             )
-            self.crown_last_subscribe_time = now
-            self.crown_subscribe_send_count += 1
-            if self.crown_subscribe_send_count == 1 or force:
+            if self.crown_subscribe_send_count == 0:
                 logger.info(
-                    "Sent Crown subscribe packet to "
+                    "Sent Crown subscribe packet via UDP to "
                     f"{self.crown_subscribe_host}:{self.crown_subscribe_port} "
                     f"from local UDP {self.crown_udp_bind_port}"
                 )
+            return True
         except OSError as exc:
             logger.warning(
-                "Unable to send Crown subscribe packet to "
+                "Unable to send Crown subscribe packet via UDP to "
                 f"{self.crown_subscribe_host}:{self.crown_subscribe_port}: {exc}"
             )
+            return False
+
+    def _send_crown_subscribe_tcp(self) -> bool:
+        """Send subscribe payload over a short-lived TCP connection."""
+        try:
+            with socket.create_connection((self.crown_subscribe_host, self.crown_subscribe_port), timeout=1.0) as conn:
+                conn.sendall(self.crown_subscribe_payload_bytes)
+            if self.crown_subscribe_send_count == 0:
+                logger.info(
+                    "Sent Crown subscribe packet via TCP to "
+                    f"{self.crown_subscribe_host}:{self.crown_subscribe_port}"
+                )
+            return True
+        except OSError as exc:
+            logger.warning(
+                "Unable to send Crown subscribe packet via TCP to "
+                f"{self.crown_subscribe_host}:{self.crown_subscribe_port}: {exc}"
+            )
+            return False
 
     def _extract_udp_meter_level(self, payload: bytes) -> Optional[float]:
         """Parse a HiQnet MultiParamSet UDP frame and return the first parameter value.
