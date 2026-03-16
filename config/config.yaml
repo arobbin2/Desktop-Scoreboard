@@ -111,8 +111,8 @@ crown:
   marker_offset_db: 48.0
   marker_scale: 1.0  # >1.0 expands movement if marker values are clustered near 0 dB
   marker_activity_log_interval_seconds: 2.0  # DEBUG: logs top moving marker signatures
-  probe_all_float_offsets: true  # DEBUG: scan all 4-byte windows for plausible float meter candidates
-  probe_use_best_offset: true  # Use the most active float offset as meter source
+  probe_all_float_offsets: false  # DEBUG: scan all 4-byte windows for plausible float meter candidates
+  probe_use_best_offset: false  # Use the most active float offset as meter source
   probe_log_interval_seconds: 2.0
   probe_min_activity: 0.01
   udp_stats_log_interval_seconds: 2.0
