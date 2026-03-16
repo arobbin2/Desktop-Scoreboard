@@ -874,6 +874,10 @@ class ScoreboardApp:
             logger.debug("Crown UDP short payload ignored: len=4 value=%r", payload)
             return None
 
+        marker_level = self._extract_marker_float_level(payload)
+        if marker_level is not None:
+            return marker_level
+
         # Try as a direct frame first.
         direct_level = self._extract_hiqnet_level_from_frame(payload, 0)
         if direct_level is not None:
@@ -892,6 +896,36 @@ class ScoreboardApp:
         if len(payload) < 34:
             logger.debug("Crown UDP short payload ignored: len=%d", len(payload))
         return None
+
+    def _extract_marker_float_level(self, payload: bytes) -> Optional[float]:
+        """Extract Crown meter using known marker pattern: 10 17 <ch> ... 0b 06 <float32>."""
+        import struct
+
+        search = 0
+        best: Optional[float] = None
+        while True:
+            marker = payload.find(b"\x10\x17", search)
+            if marker < 0:
+                break
+
+            # Search for 0B 06 near channel marker and parse following big-endian float.
+            end = min(len(payload), marker + 128)
+            field = payload.find(b"\x0b\x06", marker, end)
+            if field != -1 and (field + 6) <= len(payload):
+                try:
+                    raw = float(struct.unpack(">f", payload[field + 2 : field + 6])[0])
+                except (struct.error, ValueError, OverflowError):
+                    raw = float("nan")
+
+                if raw == raw and -200.0 <= raw <= 50.0:
+                    mapped = max(self.crown_meter_min_db, min(self.crown_meter_max_db, raw))
+                    logger.debug("Crown marker FLOAT32: raw=%.3f mapped=%.3f", raw, mapped)
+                    if (best is None) or (mapped > best):
+                        best = mapped
+
+            search = marker + 1
+
+        return best
 
     def _extract_hiqnet_level_from_frame(self, payload: bytes, offset: int) -> Optional[float]:
         """Attempt to extract one meter value from a HiQnet MultiParamSet frame at offset."""
