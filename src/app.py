@@ -173,6 +173,15 @@ class ScoreboardApp:
         self.crown_meter_max_db = self._as_float(crown_config.get("meter_max_db"), fallback=0.0)
         if self.crown_meter_max_db <= self.crown_meter_min_db:
             self.crown_meter_max_db = self.crown_meter_min_db + 1.0
+        self.crown_marker_channel_id = self._as_int(
+            crown_config.get("marker_channel_id"),
+            fallback=1,
+            minimum=1,
+        )
+        self.crown_marker_offset_db = self._as_float(
+            crown_config.get("marker_offset_db"),
+            fallback=48.0,
+        )
         self.crown_frame_interval_seconds = self._as_float(
             crown_config.get("frame_interval_seconds"),
             fallback=0.1,
@@ -902,11 +911,18 @@ class ScoreboardApp:
         import struct
 
         search = 0
-        best: Optional[float] = None
+        candidates: List[Tuple[int, float, float]] = []
         while True:
             marker = payload.find(b"\x10\x17", search)
             if marker < 0:
                 break
+
+            if (marker + 2) >= len(payload):
+                break
+            channel_id = int(payload[marker + 2])
+            if channel_id != self.crown_marker_channel_id:
+                search = marker + 1
+                continue
 
             # Search for 0B 06 near channel marker and parse following big-endian float.
             end = min(len(payload), marker + 128)
@@ -918,14 +934,29 @@ class ScoreboardApp:
                     raw = float("nan")
 
                 if raw == raw and -200.0 <= raw <= 50.0:
-                    mapped = max(self.crown_meter_min_db, min(self.crown_meter_max_db, raw))
-                    logger.debug("Crown marker FLOAT32: raw=%.3f mapped=%.3f", raw, mapped)
-                    if (best is None) or (mapped > best):
-                        best = mapped
+                    # Many Crown marker values are in an absolute scale (~41..48).
+                    # Convert to display dBFS-like scale using configurable offset.
+                    mapped_source = raw
+                    if raw > self.crown_meter_max_db:
+                        mapped_source = raw - self.crown_marker_offset_db
+
+                    mapped = max(self.crown_meter_min_db, min(self.crown_meter_max_db, mapped_source))
+                    candidates.append((channel_id, raw, mapped))
 
             search = marker + 1
 
-        return best
+        if not candidates:
+            return None
+
+        # Pick the hottest value for the configured channel in this payload.
+        selected = max(candidates, key=lambda item: item[2])
+        logger.debug(
+            "Crown marker FLOAT32: ch=%d raw=%.3f mapped=%.3f",
+            selected[0],
+            selected[1],
+            selected[2],
+        )
+        return selected[2]
 
     def _extract_hiqnet_level_from_frame(self, payload: bytes, offset: int) -> Optional[float]:
         """Attempt to extract one meter value from a HiQnet MultiParamSet frame at offset."""
