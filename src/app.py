@@ -273,6 +273,7 @@ class ScoreboardApp:
         self.crown_subscribe_send_count = 0
         self.crown_last_tcp_keepalive_time = 0.0
         self.crown_tcp_sequence = 1
+        self.crown_subscribe_all_log_emitted = False
 
         # Set up signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -522,14 +523,17 @@ class ScoreboardApp:
         if not self.crown_subscribe_enabled:
             return
 
-        payload_bytes = self._resolve_crown_subscribe_payload()
-        if not self.crown_subscribe_host or not payload_bytes:
+        if not self.crown_subscribe_host:
             return
 
         if (not force) and self.crown_last_subscribe_time > 0:
             elapsed = now - self.crown_last_subscribe_time
             if elapsed < self.crown_subscribe_interval_seconds:
                 return
+
+        payload_bytes = self._resolve_crown_subscribe_payload()
+        if not payload_bytes:
+            return
 
         sent = False
         if self.crown_subscribe_transport == "tcp":
@@ -809,13 +813,15 @@ class ScoreboardApp:
         frame.extend((int(self.crown_subscribe_initial_update) & 0xFFFF).to_bytes(2, "big"))
         self.crown_tcp_sequence = (self.crown_tcp_sequence + 1) & 0xFFFF
 
-        logger.debug(
-            "Built Crown SubscribeAll-sensor payload: source_node=%d change_type=%d sensor_rate_ms=%d initial_update=%d",
-            self.crown_source_node,
-            self.crown_subscribe_sensor_change_type,
-            self.crown_subscribe_sensor_rate_ms,
-            self.crown_subscribe_initial_update,
-        )
+        if not self.crown_subscribe_all_log_emitted:
+            logger.debug(
+                "Built Crown SubscribeAll-sensor payload: source_node=%d change_type=%d sensor_rate_ms=%d initial_update=%d",
+                self.crown_source_node,
+                self.crown_subscribe_sensor_change_type,
+                self.crown_subscribe_sensor_rate_ms,
+                self.crown_subscribe_initial_update,
+            )
+            self.crown_subscribe_all_log_emitted = True
         return bytes(frame)
 
     def _extract_udp_meter_level(self, payload: bytes) -> Optional[float]:
