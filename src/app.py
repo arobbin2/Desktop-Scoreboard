@@ -274,6 +274,8 @@ class ScoreboardApp:
         self.crown_last_tcp_keepalive_time = 0.0
         self.crown_tcp_sequence = 1
         self.crown_subscribe_all_log_emitted = False
+        self.crown_udp_packet_log_counter = 0
+        self.crown_udp_unparsed_log_counter = 0
 
         # Set up signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -505,9 +507,16 @@ class ScoreboardApp:
                 logger.warning(f"Crown UDP read error: {exc}")
                 return
 
-            logger.debug("Crown UDP packet: src=%s:%d len=%d", addr[0], addr[1], len(payload))
+            self.crown_udp_packet_log_counter += 1
+            # Avoid flooding logs while still proving packet flow is alive.
+            if self.crown_udp_packet_log_counter % 100 == 1:
+                logger.debug("Crown UDP packet: src=%s:%d len=%d", addr[0], addr[1], len(payload))
             level = self._extract_udp_meter_level(payload)
             if level is None:
+                self.crown_udp_unparsed_log_counter += 1
+                if self.crown_udp_unparsed_log_counter % 200 == 1:
+                    preview = payload[:32].hex()
+                    logger.debug("Crown UDP unparsed sample: len=%d head=%s", len(payload), preview)
                 continue
 
             now = time.time()
@@ -870,16 +879,15 @@ class ScoreboardApp:
         if direct_level is not None:
             return direct_level
 
-        # Some devices batch/encapsulate multiple frames in one datagram; scan for frame starts.
-        search_start = 0
-        while True:
-            marker = payload.find(b"\x02\x19", search_start)
-            if marker < 0:
-                break
+        # Some devices batch/encapsulate multiple frames in one datagram; scan for version byte.
+        # Header length is not always 0x19, so we try each plausible frame start.
+        scan_limit = max(0, len(payload) - 25)
+        for marker in range(scan_limit + 1):
+            if payload[marker] != 0x02:
+                continue
             embedded_level = self._extract_hiqnet_level_from_frame(payload, marker)
             if embedded_level is not None:
                 return embedded_level
-            search_start = marker + 1
 
         if len(payload) < 34:
             logger.debug("Crown UDP short payload ignored: len=%d", len(payload))
