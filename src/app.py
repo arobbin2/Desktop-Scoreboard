@@ -498,7 +498,7 @@ class ScoreboardApp:
         # Meter frames arrive at ~50 ms intervals; draining more prevents queue build-up.
         for _ in range(20):
             try:
-                payload, addr = self.crown_udp_socket.recvfrom(2048)
+                payload, addr = self.crown_udp_socket.recvfrom(65535)
             except BlockingIOError:
                 return
             except OSError as exc:
@@ -865,53 +865,158 @@ class ScoreboardApp:
             logger.debug("Crown UDP short payload ignored: len=4 value=%r", payload)
             return None
 
-        # Need at least header (25) + num_params (2) + param_id (2) + datatype (1) + value (4).
+        # Try as a direct frame first.
+        direct_level = self._extract_hiqnet_level_from_frame(payload, 0)
+        if direct_level is not None:
+            return direct_level
+
+        # Some devices batch/encapsulate multiple frames in one datagram; scan for frame starts.
+        search_start = 0
+        while True:
+            marker = payload.find(b"\x02\x19", search_start)
+            if marker < 0:
+                break
+            embedded_level = self._extract_hiqnet_level_from_frame(payload, marker)
+            if embedded_level is not None:
+                return embedded_level
+            search_start = marker + 1
+
         if len(payload) < 34:
             logger.debug("Crown UDP short payload ignored: len=%d", len(payload))
+        return None
+
+    def _extract_hiqnet_level_from_frame(self, payload: bytes, offset: int) -> Optional[float]:
+        """Attempt to extract one meter value from a HiQnet MultiParamSet frame at offset."""
+        import struct
+
+        if len(payload) < (offset + 25):
+            return None
+        if payload[offset] != 0x02:  # HiQnet version 2
             return None
 
-        if payload[0] != 0x02:  # HiQnet version 2
+        header_len = payload[offset + 1]
+        if header_len < 25 or len(payload) < (offset + header_len + 3):
             return None
 
-        header_len = payload[1]
-        if header_len < 25 or len(payload) < header_len + 9:
+        msg_id = struct.unpack(">H", payload[offset + 18 : offset + 20])[0]
+        if msg_id != 0x0100:
             return None
 
-        msg_id = struct.unpack(">H", payload[18:20])[0]
-        if msg_id != 0x0100:  # 0x0100 = MultiParamSet; skip Discovery (0x0000) etc.
-            logger.debug("Crown UDP: ignoring msg_id=0x%04X len=%d", msg_id, len(payload))
-            return None
+        message_len = struct.unpack(">I", payload[offset + 2 : offset + 6])[0]
+        frame_end = min(len(payload), offset + max(header_len, message_len))
 
-        p = header_len
+        p = offset + header_len
+        if p + 2 > frame_end:
+            return None
         num_params = struct.unpack(">H", payload[p : p + 2])[0]
-        if num_params == 0:
+        if num_params <= 0:
             return None
-
         p += 2
-        param_id = struct.unpack(">H", payload[p : p + 2])[0]
-        datatype = payload[p + 2]
-        v = p + 3  # byte offset of value field
 
-        if datatype == 6:  # FLOAT32 — direct dB value
-            if v + 4 > len(payload):
-                return None
-            raw: float = struct.unpack(">f", payload[v : v + 4])[0]
-            logger.debug("Crown UDP MultiParamSet: param_id=%d FLOAT32=%.3f dB", param_id, raw)
-        elif datatype == 4:  # LONG (signed int32)
-            if v + 4 > len(payload):
-                return None
-            raw = float(struct.unpack(">l", payload[v : v + 4])[0])
-            logger.debug("Crown UDP MultiParamSet: param_id=%d LONG=%.0f", param_id, raw)
-        elif datatype == 5:  # ULONG (unsigned int32)
-            if v + 4 > len(payload):
-                return None
-            raw = float(struct.unpack(">L", payload[v : v + 4])[0])
-            logger.debug("Crown UDP MultiParamSet: param_id=%d ULONG=%.0f", param_id, raw)
-        else:
-            logger.debug("Crown UDP MultiParamSet: param_id=%d unhandled datatype=%d", param_id, datatype)
+        for _ in range(num_params):
+            if p + 3 > frame_end:
+                break
+
+            param_id = struct.unpack(">H", payload[p : p + 2])[0]
+            datatype = payload[p + 2]
+            p += 3
+
+            value_size = self._hiqnet_datatype_size(datatype)
+            if value_size <= 0 or (p + value_size) > frame_end:
+                break
+
+            raw = self._decode_hiqnet_numeric_value(payload[p : p + value_size], datatype)
+            p += value_size
+            if raw is None:
+                continue
+
+            meter_value = self._map_hiqnet_raw_to_meter_db(raw, datatype)
+            logger.debug(
+                "Crown UDP MultiParamSet: param_id=%d datatype=%d raw=%.6f mapped=%.3f",
+                param_id,
+                datatype,
+                raw,
+                meter_value,
+            )
+            return meter_value
+
+        return None
+
+    @staticmethod
+    def _hiqnet_datatype_size(datatype: int) -> int:
+        """Return byte width for HiQnet datatype enum."""
+        if datatype in {0, 1}:  # BYTE, UBYTE
+            return 1
+        if datatype in {2, 3}:  # WORD, UWORD
+            return 2
+        if datatype in {4, 5, 6}:  # LONG, ULONG, FLOAT32
+            return 4
+        if datatype == 7:  # FLOAT64
+            return 8
+        return 0
+
+    @staticmethod
+    def _decode_hiqnet_numeric_value(raw_bytes: bytes, datatype: int) -> Optional[float]:
+        """Decode HiQnet numeric payload bytes to float."""
+        import struct
+
+        try:
+            if datatype == 0:
+                return float(struct.unpack(">b", raw_bytes)[0])
+            if datatype == 1:
+                return float(struct.unpack(">B", raw_bytes)[0])
+            if datatype == 2:
+                return float(struct.unpack(">h", raw_bytes)[0])
+            if datatype == 3:
+                return float(struct.unpack(">H", raw_bytes)[0])
+            if datatype == 4:
+                return float(struct.unpack(">l", raw_bytes)[0])
+            if datatype == 5:
+                return float(struct.unpack(">L", raw_bytes)[0])
+            if datatype == 6:
+                return float(struct.unpack(">f", raw_bytes)[0])
+            if datatype == 7:
+                return float(struct.unpack(">d", raw_bytes)[0])
+        except (struct.error, OverflowError, ValueError):
             return None
+        return None
 
-        return max(self.crown_meter_min_db, min(self.crown_meter_max_db, raw))
+    def _map_hiqnet_raw_to_meter_db(self, raw_value: float, datatype: int) -> float:
+        """Map decoded HiQnet numeric value to display dB range."""
+        # FLOAT32/FLOAT64 are usually direct dB values.
+        if datatype in {6, 7}:
+            return max(self.crown_meter_min_db, min(self.crown_meter_max_db, raw_value))
+
+        # If integer already looks like dB, trust it.
+        if self.crown_meter_min_db <= raw_value <= self.crown_meter_max_db:
+            return raw_value
+
+        span = self.crown_meter_max_db - self.crown_meter_min_db
+        if span <= 0:
+            return self.crown_meter_min_db
+
+        # Scale unsigned integer domains into dB span as a fallback.
+        unsigned_max_by_type = {1: 255.0, 3: 65535.0, 5: 4294967295.0}
+        max_raw = unsigned_max_by_type.get(datatype)
+        if max_raw is not None and max_raw > 0:
+            scaled = self.crown_meter_min_db + ((raw_value / max_raw) * span)
+            return max(self.crown_meter_min_db, min(self.crown_meter_max_db, scaled))
+
+        # Signed integers fallback: normalize full signed range to [0,1].
+        signed_range_by_type = {
+            0: (-128.0, 127.0),
+            2: (-32768.0, 32767.0),
+            4: (-2147483648.0, 2147483647.0),
+        }
+        signed_range = signed_range_by_type.get(datatype)
+        if signed_range is not None:
+            min_raw, max_raw_signed = signed_range
+            normalized = (raw_value - min_raw) / (max_raw_signed - min_raw)
+            normalized = max(0.0, min(1.0, normalized))
+            scaled = self.crown_meter_min_db + (normalized * span)
+            return max(self.crown_meter_min_db, min(self.crown_meter_max_db, scaled))
+
+        return max(self.crown_meter_min_db, min(self.crown_meter_max_db, raw_value))
 
     @staticmethod
     def _extract_hex_bytes_from_udp_payload(payload: bytes) -> List[int]:
