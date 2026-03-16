@@ -192,6 +192,22 @@ class ScoreboardApp:
             fallback=2.0,
             minimum=0.5,
         )
+        self.crown_probe_all_float_offsets = bool(
+            crown_config.get("probe_all_float_offsets", False)
+        )
+        self.crown_probe_use_best_offset = bool(
+            crown_config.get("probe_use_best_offset", False)
+        )
+        self.crown_probe_log_interval_seconds = self._as_float(
+            crown_config.get("probe_log_interval_seconds"),
+            fallback=2.0,
+            minimum=0.5,
+        )
+        self.crown_probe_min_activity = self._as_float(
+            crown_config.get("probe_min_activity"),
+            fallback=0.01,
+            minimum=0.0,
+        )
         self.crown_target_param_id = self._as_int(
             crown_config.get("target_param_id"),
             fallback=6,
@@ -311,6 +327,9 @@ class ScoreboardApp:
         self.crown_tuple_activity_by_key: Dict[Tuple[int, int, int], float] = {}
         self.crown_last_marker_mapped_level: Optional[float] = None
         self.crown_last_marker_level_time = 0.0
+        self.crown_probe_last_raw_by_offset: Dict[int, float] = {}
+        self.crown_probe_activity_by_offset: Dict[int, float] = {}
+        self.crown_last_probe_log_time = 0.0
 
         # Set up signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -909,6 +928,10 @@ class ScoreboardApp:
             logger.debug("Crown UDP short payload ignored: len=4 value=%r", payload)
             return None
 
+        probe_level = self._probe_udp_float_offsets(payload)
+        if probe_level is not None:
+            return probe_level
+
         marker_level = self._extract_marker_float_level(payload)
         if marker_level is not None:
             return marker_level
@@ -955,6 +978,78 @@ class ScoreboardApp:
         if len(payload) < 34:
             logger.debug("Crown UDP short payload ignored: len=%d", len(payload))
         return None
+
+    def _probe_udp_float_offsets(self, payload: bytes) -> Optional[float]:
+        """Scan all 4-byte windows for plausible FLOAT32 values and rank by activity."""
+        import struct
+
+        if not self.crown_probe_all_float_offsets or len(payload) < 8:
+            return None
+
+        candidates: List[Tuple[int, float, float]] = []
+        for offset in range(0, len(payload) - 3):
+            try:
+                raw = float(struct.unpack(">f", payload[offset : offset + 4])[0])
+            except (struct.error, ValueError, OverflowError):
+                continue
+
+            if raw != raw or raw < -200.0 or raw > 50.0:
+                continue
+
+            previous_raw = self.crown_probe_last_raw_by_offset.get(offset)
+            delta = abs(raw - previous_raw) if previous_raw is not None else 0.0
+            previous_activity = self.crown_probe_activity_by_offset.get(offset, 0.0)
+            activity = (previous_activity * 0.90) + (delta * 0.10)
+            self.crown_probe_last_raw_by_offset[offset] = raw
+            self.crown_probe_activity_by_offset[offset] = activity
+
+            mapped_source = raw
+            if raw > self.crown_meter_max_db:
+                mapped_source = (raw - self.crown_marker_offset_db) * self.crown_marker_scale
+            mapped = max(self.crown_meter_min_db, min(self.crown_meter_max_db, mapped_source))
+            candidates.append((offset, raw, mapped))
+
+        if not candidates:
+            return None
+
+        now = time.time()
+        if (now - self.crown_last_probe_log_time) >= self.crown_probe_log_interval_seconds:
+            ranked = sorted(
+                candidates,
+                key=lambda item: self.crown_probe_activity_by_offset.get(item[0], 0.0),
+                reverse=True,
+            )
+            top_parts: List[str] = []
+            for offset, raw, mapped in ranked[:6]:
+                activity = self.crown_probe_activity_by_offset.get(offset, 0.0)
+                top_parts.append(
+                    f"off={offset} raw={raw:.3f} mapped={mapped:.3f} act={activity:.5f}"
+                )
+            if top_parts:
+                logger.debug("Crown float offset activity top: %s", " | ".join(top_parts))
+                self.crown_last_probe_log_time = now
+
+        if not self.crown_probe_use_best_offset:
+            return None
+
+        best_offset, best_raw, best_mapped = max(
+            candidates,
+            key=lambda item: self.crown_probe_activity_by_offset.get(item[0], 0.0),
+        )
+        best_activity = self.crown_probe_activity_by_offset.get(best_offset, 0.0)
+        if best_activity < self.crown_probe_min_activity:
+            return None
+
+        logger.debug(
+            "Crown float offset selected: off=%d raw=%.3f mapped=%.3f act=%.5f",
+            best_offset,
+            best_raw,
+            best_mapped,
+            best_activity,
+        )
+        self.crown_last_marker_mapped_level = best_mapped
+        self.crown_last_marker_level_time = time.time()
+        return best_mapped
 
     def _extract_marker_float_level(self, payload: bytes) -> Optional[float]:
         """Extract Crown meter using known marker pattern: 10 17 <ch> ... 0b 06 <float32>."""
