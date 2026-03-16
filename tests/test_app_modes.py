@@ -183,6 +183,42 @@ class TestAppModes(unittest.TestCase):
 
         self.assertIsNone(level)
 
+    def test_extract_udp_meter_level_0101_falls_back_when_target_flat(self):
+        """When target param is flat 0.000, parser should use active fallback param."""
+        import struct
+
+        self.app.crown_meter_min_db = -60.0
+        self.app.crown_meter_max_db = 0.0
+        self.app.crown_target_param_id = 6
+
+        header = bytes([
+            0x02,
+            0x19,
+            0x00, 0x00, 0x00, 0x33,  # message length = 51
+            0x00, 0x01,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x33,
+            0x00, 0x10, 0x17, 0x01,
+            0x01, 0x01,              # msg_id = 0x0101
+            0x00, 0x20,
+            0x05,
+            0x00, 0x01,
+        ])
+
+        body = bytes([
+            0x00, 0x00,              # count/reserved
+            0x00, 0x10, 0x17, 0x01,  # object id
+            0x00, 0x06, 0x06,        # param 6, FLOAT32
+        ]) + struct.pack(">f", 0.0) + bytes([
+            0x00, 0x04, 0x06,        # param 4, FLOAT32
+        ]) + struct.pack(">f", -18.5)
+
+        packet = header + body
+        level = self.app._extract_udp_meter_level(packet)
+
+        self.assertIsNotNone(level)
+        self.assertAlmostEqual(level, -18.5, places=3)
+
     def test_parse_hex_payload_accepts_comma_and_space_formats(self):
         parsed = self.app._parse_hex_payload("02,19,00,FF")
         self.assertEqual(parsed, bytes([0x02, 0x19, 0x00, 0xFF]))

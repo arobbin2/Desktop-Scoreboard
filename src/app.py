@@ -1070,6 +1070,8 @@ class ScoreboardApp:
             seen.add(param_id)
             ordered_params.append(param_id)
 
+        marker_candidates: Dict[int, Tuple[int, float]] = {}
+
         for param_id in ordered_params:
             # Prefer FLOAT32 first.
             marker_float = int(param_id).to_bytes(2, "big") + bytes([6])
@@ -1078,14 +1080,8 @@ class ScoreboardApp:
                 raw_f = self._decode_hiqnet_numeric_value(payload[idx + 3 : idx + 7], 6)
                 if raw_f is not None:
                     mapped_f = self._map_hiqnet_raw_to_meter_db(raw_f, 6)
-                    logger.debug(
-                        "Crown UDP 0x0101: obj=0x%08X selected_param=%d datatype=%d mapped=%.3f",
-                        object_id,
-                        param_id,
-                        6,
-                        mapped_f,
-                    )
-                    return mapped_f
+                    marker_candidates[param_id] = (6, mapped_f)
+                    continue
 
             # Then try integer/byte datatypes for the same param.
             for datatype in (5, 4, 3, 2, 1, 0):
@@ -1100,14 +1096,45 @@ class ScoreboardApp:
                 if raw_n is None:
                     continue
                 mapped_n = self._map_hiqnet_raw_to_meter_db(raw_n, datatype)
-                logger.debug(
-                    "Crown UDP 0x0101: obj=0x%08X selected_param=%d datatype=%d mapped=%.3f",
-                    object_id,
-                    param_id,
-                    datatype,
-                    mapped_n,
-                )
-                return mapped_n
+                marker_candidates[param_id] = (datatype, mapped_n)
+                break
+
+        if marker_candidates:
+            selected_param = self.crown_target_param_id if self.crown_target_param_id in marker_candidates else ordered_params[0]
+            selected_dtype, selected_value = marker_candidates[selected_param]
+
+            # Some Crown streams carry a valid but flat target param (commonly 0.000).
+            # Prefer the first non-flat fallback candidate so the display remains responsive.
+            if abs(selected_value) < 0.001:
+                for fallback_param in ordered_params:
+                    if fallback_param == selected_param:
+                        continue
+                    fallback = marker_candidates.get(fallback_param)
+                    if fallback is None:
+                        continue
+                    fallback_dtype, fallback_value = fallback
+                    if abs(fallback_value) >= 0.001:
+                        logger.debug(
+                            "Crown UDP 0x0101 fallback: obj=0x%08X target_param=%d target_mapped=%.3f using_param=%d mapped=%.3f",
+                            object_id,
+                            selected_param,
+                            selected_value,
+                            fallback_param,
+                            fallback_value,
+                        )
+                        selected_param = fallback_param
+                        selected_dtype = fallback_dtype
+                        selected_value = fallback_value
+                        break
+
+            logger.debug(
+                "Crown UDP 0x0101: obj=0x%08X selected_param=%d datatype=%d mapped=%.3f",
+                object_id,
+                selected_param,
+                selected_dtype,
+                selected_value,
+            )
+            return selected_value
 
         candidates: List[Tuple[int, int, float]] = []
         while p + 3 <= frame_end:
