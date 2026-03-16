@@ -1020,8 +1020,16 @@ class ScoreboardApp:
             self.crown_marker_activity_by_signature[key] = activity
 
         if self.crown_marker_channel_id > 0:
-            # Fixed channel mode: pick hottest mapped value within configured channel.
-            selected = max(candidates, key=lambda item: item[3])
+            # Fixed channel mode: restrict to configured channel and pick the
+            # field with the strongest short-term movement.
+            channel_candidates = [
+                item for item in candidates if item[0] == self.crown_marker_channel_id
+            ]
+            pool = channel_candidates if channel_candidates else candidates
+            selected = max(
+                pool,
+                key=lambda item: self.crown_marker_activity_by_signature.get((item[0], item[1]), 0.0),
+            )
         else:
             # Auto mode: pick signature (channel + nearby field offset) with highest
             # short-term movement to surface the live meter field.
