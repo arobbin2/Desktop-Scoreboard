@@ -300,6 +300,8 @@ class ScoreboardApp:
         self.crown_udp_unparsed_log_counter = 0
         self.crown_marker_last_raw_by_channel: Dict[int, float] = {}
         self.crown_marker_last_raw_by_signature: Dict[Tuple[int, int], float] = {}
+        self.crown_tuple_last_raw_by_key: Dict[Tuple[int, int, int], float] = {}
+        self.crown_tuple_activity_by_key: Dict[Tuple[int, int, int], float] = {}
         self.crown_last_marker_mapped_level: Optional[float] = None
         self.crown_last_marker_level_time = 0.0
 
@@ -1119,7 +1121,7 @@ class ScoreboardApp:
             seen.add(param_id)
             ordered_params.append(param_id)
 
-        marker_candidates: Dict[int, Tuple[int, float]] = {}
+        marker_candidates: Dict[int, Tuple[int, float, float]] = {}
 
         for param_id in ordered_params:
             # Prefer FLOAT32 first.
@@ -1129,7 +1131,7 @@ class ScoreboardApp:
                 raw_f = self._decode_hiqnet_numeric_value(payload[idx + 3 : idx + 7], 6)
                 if raw_f is not None:
                     mapped_f = self._map_hiqnet_raw_to_meter_db(raw_f, 6)
-                    marker_candidates[param_id] = (6, mapped_f)
+                    marker_candidates[param_id] = (6, mapped_f, raw_f)
                     continue
 
             # Then try integer/byte datatypes for the same param.
@@ -1145,12 +1147,25 @@ class ScoreboardApp:
                 if raw_n is None:
                     continue
                 mapped_n = self._map_hiqnet_raw_to_meter_db(raw_n, datatype)
-                marker_candidates[param_id] = (datatype, mapped_n)
+                marker_candidates[param_id] = (datatype, mapped_n, raw_n)
                 break
 
         if marker_candidates:
             selected_param = self.crown_target_param_id if self.crown_target_param_id in marker_candidates else ordered_params[0]
-            selected_dtype, selected_value = marker_candidates[selected_param]
+            selected_dtype, selected_value, selected_raw = marker_candidates[selected_param]
+
+            # Track tuple movement per object/param/datatype and prefer the
+            # most dynamic candidate when the target tuple appears static.
+            tuple_activity: Dict[int, float] = {}
+            for param_id, (dtype, _mapped, raw) in marker_candidates.items():
+                key = (object_id, param_id, dtype)
+                previous_raw = self.crown_tuple_last_raw_by_key.get(key)
+                delta = abs(raw - previous_raw) if previous_raw is not None else 0.0
+                previous_activity = self.crown_tuple_activity_by_key.get(key, 0.0)
+                activity = (previous_activity * 0.90) + (delta * 0.10)
+                self.crown_tuple_last_raw_by_key[key] = raw
+                self.crown_tuple_activity_by_key[key] = activity
+                tuple_activity[param_id] = activity
 
             # Some Crown streams carry a valid but flat target param (commonly 0.000).
             # Prefer the first non-flat fallback candidate so the display remains responsive.
@@ -1161,7 +1176,7 @@ class ScoreboardApp:
                     fallback = marker_candidates.get(fallback_param)
                     if fallback is None:
                         continue
-                    fallback_dtype, fallback_value = fallback
+                    fallback_dtype, fallback_value, fallback_raw = fallback
                     if abs(fallback_value) >= 0.001:
                         logger.debug(
                             "Crown UDP 0x0101 fallback: obj=0x%08X target_param=%d target_mapped=%.3f using_param=%d mapped=%.3f",
@@ -1174,7 +1189,32 @@ class ScoreboardApp:
                         selected_param = fallback_param
                         selected_dtype = fallback_dtype
                         selected_value = fallback_value
+                        selected_raw = fallback_raw
                         break
+
+            selected_activity = tuple_activity.get(selected_param, 0.0)
+            dynamic_param = selected_param
+            dynamic_score = selected_activity
+            for candidate_param, activity in tuple_activity.items():
+                if activity > dynamic_score:
+                    dynamic_param = candidate_param
+                    dynamic_score = activity
+
+            if dynamic_param != selected_param and dynamic_score > (selected_activity * 1.5 + 0.01):
+                dynamic_dtype, dynamic_value, dynamic_raw = marker_candidates[dynamic_param]
+                logger.debug(
+                    "Crown UDP 0x0101 dynamic: obj=0x%08X selected_param=%d activity=%.5f using_param=%d activity=%.5f mapped=%.3f",
+                    object_id,
+                    selected_param,
+                    selected_activity,
+                    dynamic_param,
+                    dynamic_score,
+                    dynamic_value,
+                )
+                selected_param = dynamic_param
+                selected_dtype = dynamic_dtype
+                selected_value = dynamic_value
+                selected_raw = dynamic_raw
 
             logger.debug(
                 "Crown UDP 0x0101: obj=0x%08X selected_param=%d datatype=%d mapped=%.3f",
