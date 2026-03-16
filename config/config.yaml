@@ -108,6 +108,7 @@ crown:
   meter_min_db: -40.0
   meter_max_db: 0.0
   meter_calibration_db: -14.0  # Shift decoded meter values to align with amp front-panel dB reference
+  meter_smoothing_alpha: 0.30  # 0=no smoothing, 1=no smoothing memory (instant)
   marker_channel_id: 3  # 0 = auto-select most dynamic marker channel
   marker_offset_db: 48.0
   marker_scale: 1.0  # >1.0 expands movement if marker values are clustered near 0 dB
@@ -121,7 +122,7 @@ crown:
   udp_stats_log_interval_seconds: 2.0
   use_london_meter_scaling: false  # Soundweb London raw/10000 conversion; usually false for Crown streams
   target_param_id: 6  # preferred param in 0x0101 updates (e.g., 6=Power, 4=RMS Amp, 1=RMS Level)
-  frame_interval_seconds: 0.1
+  frame_interval_seconds: 0.06
   stale_after_seconds: 5.0
   fallback_to_scoreboard_on_stale: false
   waiting_text: "CROWN WAIT"

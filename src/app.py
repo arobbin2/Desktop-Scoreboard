@@ -198,6 +198,12 @@ class ScoreboardApp:
             crown_config.get("meter_calibration_db"),
             fallback=0.0,
         )
+        smoothing_alpha = self._as_float(
+            crown_config.get("meter_smoothing_alpha"),
+            fallback=0.30,
+            minimum=0.0,
+        )
+        self.crown_meter_smoothing_alpha = max(0.0, min(1.0, smoothing_alpha))
         if self.crown_meter_max_db <= self.crown_meter_min_db:
             self.crown_meter_max_db = self.crown_meter_min_db + 1.0
         self.crown_marker_channel_id = self._as_int(
@@ -369,6 +375,7 @@ class ScoreboardApp:
         self.crown_level_window_count = 0
         self.crown_level_window_min: Optional[float] = None
         self.crown_level_window_max: Optional[float] = None
+        self.crown_smoothed_level: Optional[float] = None
         self.crown_marker_last_raw_by_channel: Dict[int, float] = {}
         self.crown_marker_last_raw_by_signature: Dict[Tuple[int, int], float] = {}
         self.crown_marker_activity_by_signature: Dict[Tuple[int, int], float] = {}
@@ -624,19 +631,35 @@ class ScoreboardApp:
                     logger.debug("Crown UDP unparsed sample: len=%d head=%s", len(payload), preview)
                 continue
 
-            now = time.time()
-            self.crown_meter_state = {
-                "levels": [level],
-                "updated_at": now,
-                "status_text": "udp-live",
-            }
-            self.crown_last_payload_time = now
-            self.crown_udp_parsed_log_counter += 1
-            self.crown_level_window_count += 1
-            if self.crown_level_window_min is None or level < self.crown_level_window_min:
-                self.crown_level_window_min = level
-            if self.crown_level_window_max is None or level > self.crown_level_window_max:
-                self.crown_level_window_max = level
+            self._apply_crown_level(level, status_text="udp-live")
+
+    def _apply_crown_level(self, level: float, status_text: str) -> None:
+        """Update Crown meter state, applying optional smoothing."""
+        target = float(level)
+        if self.crown_smoothed_level is None or self.crown_meter_smoothing_alpha >= 1.0:
+            smoothed = target
+        elif self.crown_meter_smoothing_alpha <= 0.0:
+            smoothed = self.crown_smoothed_level
+        else:
+            smoothed = (
+                (self.crown_smoothed_level * (1.0 - self.crown_meter_smoothing_alpha))
+                + (target * self.crown_meter_smoothing_alpha)
+            )
+
+        self.crown_smoothed_level = smoothed
+        now = time.time()
+        self.crown_meter_state = {
+            "levels": [smoothed],
+            "updated_at": now,
+            "status_text": status_text,
+        }
+        self.crown_last_payload_time = now
+        self.crown_udp_parsed_log_counter += 1
+        self.crown_level_window_count += 1
+        if self.crown_level_window_min is None or smoothed < self.crown_level_window_min:
+            self.crown_level_window_min = smoothed
+        if self.crown_level_window_max is None or smoothed > self.crown_level_window_max:
+            self.crown_level_window_max = smoothed
 
     def _maybe_log_crown_udp_stats(self, now: float) -> None:
         """Emit periodic Crown UDP ingest stats at INFO for field diagnostics."""
@@ -908,14 +931,7 @@ class ScoreboardApp:
 
         level = self._extract_udp_meter_level(payload)
         if level is not None:
-            now = time.time()
-            self.crown_meter_state = {
-                "levels": [level],
-                "updated_at": now,
-                "status_text": "tcp-live",
-            }
-            self.crown_last_payload_time = now
-            self.crown_udp_parsed_log_counter += 1
+            self._apply_crown_level(level, status_text="tcp-live")
             logger.info("Crown TCP parsed meter: mapped=%.3f", level)
 
         # Message ID 0x0008 is HiQnet Hello session request; refuse session to stay session-less.
