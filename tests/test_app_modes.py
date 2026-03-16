@@ -128,27 +128,60 @@ class TestAppModes(unittest.TestCase):
         self.assertEqual(self.app._extract_hex_bytes_from_udp_payload(b"0x7F,1A"), [0x7F, 0x1A])
         self.assertEqual(self.app._extract_hex_bytes_from_udp_payload(b"7F 1A"), [0x7F, 0x1A])
 
-    def test_extract_udp_meter_level_from_hex_byte_index(self):
+    def test_extract_udp_meter_level_parses_hiqnet_multiparamset_float32(self):
+        """A valid HiQnet MultiParamSet frame with FLOAT32 should return the dB value."""
+        import struct
+
         self.app.crown_meter_min_db = -60.0
         self.app.crown_meter_max_db = 0.0
-        self.app.crown_udp_hex_byte_index = 0
 
-        low = self.app._extract_udp_meter_level(b"00")
-        high = self.app._extract_udp_meter_level(b"FF")
+        # Build a minimal 34-byte HiQnet MultiParamSet carrying -30.0 dB as FLOAT32.
+        header = bytes([
+            0x02,                    # version = 2
+            0x19,                    # header length = 25
+            0x00, 0x00, 0x00, 0x22,  # message length = 34
+            0x00, 0x01,              # source NODE
+            0x00, 0x00, 0x00, 0x00,  # source VD-OBJECT
+            0x00, 0x33,              # dest NODE
+            0x00, 0x00, 0x00, 0x00,  # dest VD-OBJECT
+            0x01, 0x00,              # msg_id = 0x0100 (MultiParamSet)
+            0x00, 0x20,              # flags
+            0x05,                    # hop count
+            0x00, 0x00,              # sequence number
+        ])
+        param_payload = bytes([
+            0x00, 0x01,  # num_params = 1
+            0x00, 0x00,  # param_id = 0
+            0x06,        # datatype = FLOAT32
+        ]) + struct.pack(">f", -30.0)
+        packet = header + param_payload
 
-        self.assertEqual(low, -60.0)
-        self.assertEqual(high, 0.0)
-
-    def test_extract_udp_meter_level_uses_selected_byte(self):
-        self.app.crown_meter_min_db = -60.0
-        self.app.crown_meter_max_db = 0.0
-        self.app.crown_udp_hex_byte_index = 1
-
-        level = self.app._extract_udp_meter_level(b"10 80")
+        level = self.app._extract_udp_meter_level(packet)
 
         self.assertIsNotNone(level)
-        self.assertGreater(level, -40.0)
-        self.assertLess(level, -20.0)
+        self.assertAlmostEqual(level, -30.0, places=3)
+
+    def test_extract_udp_meter_level_ignores_discovery_frame(self):
+        """A 72-byte HiQnet Discovery frame (msg_id=0x0000) must return None."""
+        # Build a 72-byte Discovery packet (msg_id = 0x0000).
+        header = bytes([
+            0x02,                    # version = 2
+            0x19,                    # header length = 25
+            0x00, 0x00, 0x00, 0x48,  # message length = 72
+            0x00, 0x01,              # source NODE
+            0x00, 0x00, 0x00, 0x00,  # source VD-OBJECT
+            0x00, 0x00,              # dest NODE = broadcast
+            0x00, 0x00, 0x00, 0x00,  # dest VD-OBJECT
+            0x00, 0x00,              # msg_id = 0x0000 (Discovery)
+            0x00, 0x20,              # flags
+            0x05,                    # hop count
+            0x00, 0x00,              # sequence number
+        ])
+        packet = header + bytes(72 - 25)  # 47-byte Discovery payload, all zeros
+
+        level = self.app._extract_udp_meter_level(packet)
+
+        self.assertIsNone(level)
 
     def test_parse_hex_payload_accepts_comma_and_space_formats(self):
         parsed = self.app._parse_hex_payload("02,19,00,FF")

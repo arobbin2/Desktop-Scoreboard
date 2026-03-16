@@ -455,16 +455,18 @@ class ScoreboardApp:
         if self.crown_udp_socket is None:
             return
 
-        # Drain a few packets so latest meter value is used without starving main loop.
-        for _ in range(5):
+        # Drain up to 20 packets per tick so the display uses the latest meter value.
+        # Meter frames arrive at ~50 ms intervals; draining more prevents queue build-up.
+        for _ in range(20):
             try:
-                payload, _addr = self.crown_udp_socket.recvfrom(2048)
+                payload, addr = self.crown_udp_socket.recvfrom(2048)
             except BlockingIOError:
                 return
             except OSError as exc:
                 logger.warning(f"Crown UDP read error: {exc}")
                 return
 
+            logger.debug("Crown UDP packet: src=%s:%d len=%d", addr[0], addr[1], len(payload))
             level = self._extract_udp_meter_level(payload)
             if level is None:
                 continue
@@ -513,18 +515,78 @@ class ScoreboardApp:
             )
 
     def _extract_udp_meter_level(self, payload: bytes) -> Optional[float]:
-        """Extract a single meter level from UDP payload bytes or ASCII hex text."""
-        hex_bytes = self._extract_hex_bytes_from_udp_payload(payload)
-        if not hex_bytes:
+        """Parse a HiQnet MultiParamSet UDP frame and return the first parameter value.
+
+        Sensor parameters (meters) arrive as MultiParamSet messages (msg ID 0x0100)
+        on UDP port 3804.  Non-MultiParamSet frames (e.g. Discovery/KeepAlive at 72
+        bytes, msg ID 0x0000) are silently ignored.
+
+        HiQnet header layout (25 bytes):
+          [0]      version (0x02)
+          [1]      header length (0x19 = 25)
+          [2-5]    message length
+          [6-7]    source NODE
+          [8-11]   source VD-OBJECT
+          [12-13]  destination NODE
+          [14-17]  destination VD-OBJECT
+          [18-19]  message ID (big-endian)
+          [20-21]  flags
+          [22]     hop count
+          [23-24]  sequence number
+        MultiParamSet payload (starting at byte header_len):
+          [+0..+1] number of parameters
+          [+2..+3] parameter ID
+          [+4]     datatype  (6 = FLOAT32, 4 = LONG, 5 = ULONG)
+          [+5..+8] value (4 bytes for 32-bit types)
+        """
+        import struct
+
+        # Need at least header (25) + num_params (2) + param_id (2) + datatype (1) + value (4).
+        if len(payload) < 34:
             return None
 
-        if self.crown_udp_hex_byte_index >= len(hex_bytes):
+        if payload[0] != 0x02:  # HiQnet version 2
             return None
 
-        raw_value = float(hex_bytes[self.crown_udp_hex_byte_index])
-        span = self.crown_meter_max_db - self.crown_meter_min_db
-        scaled = self.crown_meter_min_db + ((raw_value / 255.0) * span)
-        return min(self.crown_meter_max_db, max(self.crown_meter_min_db, scaled))
+        header_len = payload[1]
+        if header_len < 25 or len(payload) < header_len + 9:
+            return None
+
+        msg_id = struct.unpack(">H", payload[18:20])[0]
+        if msg_id != 0x0100:  # 0x0100 = MultiParamSet; skip Discovery (0x0000) etc.
+            logger.debug("Crown UDP: ignoring msg_id=0x%04X len=%d", msg_id, len(payload))
+            return None
+
+        p = header_len
+        num_params = struct.unpack(">H", payload[p : p + 2])[0]
+        if num_params == 0:
+            return None
+
+        p += 2
+        param_id = struct.unpack(">H", payload[p : p + 2])[0]
+        datatype = payload[p + 2]
+        v = p + 3  # byte offset of value field
+
+        if datatype == 6:  # FLOAT32 — direct dB value
+            if v + 4 > len(payload):
+                return None
+            raw: float = struct.unpack(">f", payload[v : v + 4])[0]
+            logger.debug("Crown UDP MultiParamSet: param_id=%d FLOAT32=%.3f dB", param_id, raw)
+        elif datatype == 4:  # LONG (signed int32)
+            if v + 4 > len(payload):
+                return None
+            raw = float(struct.unpack(">l", payload[v : v + 4])[0])
+            logger.debug("Crown UDP MultiParamSet: param_id=%d LONG=%.0f", param_id, raw)
+        elif datatype == 5:  # ULONG (unsigned int32)
+            if v + 4 > len(payload):
+                return None
+            raw = float(struct.unpack(">L", payload[v : v + 4])[0])
+            logger.debug("Crown UDP MultiParamSet: param_id=%d ULONG=%.0f", param_id, raw)
+        else:
+            logger.debug("Crown UDP MultiParamSet: param_id=%d unhandled datatype=%d", param_id, datatype)
+            return None
+
+        return max(self.crown_meter_min_db, min(self.crown_meter_max_db, raw))
 
     @staticmethod
     def _extract_hex_bytes_from_udp_payload(payload: bytes) -> List[int]:
