@@ -89,6 +89,7 @@ crown:
   subscribe_enabled: true
   subscribe_host: 10.255.40.23
   subscribe_transport: udp  # udp (legacy) or tcp (HiQnet guide path)
+  subscribe_tcp_persistent: true
   subscribe_port: 3804
   subscribe_interval_seconds: 2.0
   subscribe_payload_hex: "02,19,00,00,00,2B,00,33,00,00,00,00,0E,EC,00,10,17,01,01,0F,00,20,05,00,00,00,01,00,00,00,00,33,00,10,17,01,00,00,00,00,00,00,00"

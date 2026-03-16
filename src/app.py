@@ -45,6 +45,10 @@ class ScoreboardApp:
         self.active_mode = "scoreboard"
 
         app_config = self.config.get("app") or {}
+        log_level_name = str(app_config.get("log_level", "INFO")).strip().upper() or "INFO"
+        log_level_value = getattr(logging, log_level_name, logging.INFO)
+        logging.getLogger().setLevel(log_level_value)
+        logger.setLevel(log_level_value)
         self.main_loop_sleep_seconds = self._as_float(
             app_config.get("main_loop_sleep_seconds"),
             fallback=0.005,
@@ -125,6 +129,7 @@ class ScoreboardApp:
         if self.crown_subscribe_transport not in {"udp", "tcp"}:
             logger.warning("Invalid crown.subscribe_transport. Using udp.")
             self.crown_subscribe_transport = "udp"
+        self.crown_subscribe_tcp_persistent = bool(crown_config.get("subscribe_tcp_persistent", True))
         self.crown_subscribe_port = self._as_int(crown_config.get("subscribe_port"), fallback=3804, minimum=1)
         self.crown_subscribe_interval_seconds = self._as_float(
             crown_config.get("subscribe_interval_seconds"),
@@ -237,6 +242,7 @@ class ScoreboardApp:
         self.crown_last_render_key = ""
         self.crown_last_frame_time = 0.0
         self.crown_udp_socket: Optional[socket.socket] = None
+        self.crown_tcp_socket: Optional[socket.socket] = None
         self.crown_udp_bound_address = ""
         self.crown_last_subscribe_time = 0.0
         self.crown_subscribe_send_count = 0
@@ -531,22 +537,77 @@ class ScoreboardApp:
             return False
 
     def _send_crown_subscribe_tcp(self) -> bool:
-        """Send subscribe payload over a short-lived TCP connection."""
+        """Send subscribe payload over TCP, reusing a socket when configured."""
+        tcp_socket = self._ensure_crown_tcp_socket()
+        if tcp_socket is None:
+            return False
+
         try:
-            with socket.create_connection((self.crown_subscribe_host, self.crown_subscribe_port), timeout=1.0) as conn:
-                conn.sendall(self.crown_subscribe_payload_bytes)
+            tcp_socket.sendall(self.crown_subscribe_payload_bytes)
             if self.crown_subscribe_send_count == 0:
                 logger.info(
                     "Sent Crown subscribe packet via TCP to "
                     f"{self.crown_subscribe_host}:{self.crown_subscribe_port}"
                 )
+
+            # Best effort read keeps session alive and surfaces immediate protocol errors.
+            if self.crown_subscribe_tcp_persistent:
+                try:
+                    tcp_socket.settimeout(0.05)
+                    response = tcp_socket.recv(4096)
+                    if response:
+                        logger.debug("Crown TCP response: len=%d", len(response))
+                except TimeoutError:
+                    pass
+                except OSError:
+                    pass
+                finally:
+                    tcp_socket.settimeout(None)
+            else:
+                self._close_crown_tcp_socket()
+
             return True
         except OSError as exc:
             logger.warning(
                 "Unable to send Crown subscribe packet via TCP to "
                 f"{self.crown_subscribe_host}:{self.crown_subscribe_port}: {exc}"
             )
+            self._close_crown_tcp_socket()
             return False
+
+    def _ensure_crown_tcp_socket(self) -> Optional[socket.socket]:
+        """Connect TCP control socket for Crown subscribe traffic."""
+        if self.crown_tcp_socket is not None:
+            return self.crown_tcp_socket
+
+        try:
+            tcp_socket = socket.create_connection((self.crown_subscribe_host, self.crown_subscribe_port), timeout=1.0)
+            tcp_socket.settimeout(None)
+            self.crown_tcp_socket = tcp_socket
+            logger.info(
+                "Connected Crown TCP control socket to "
+                f"{self.crown_subscribe_host}:{self.crown_subscribe_port}"
+            )
+            return tcp_socket
+        except OSError as exc:
+            logger.warning(
+                "Unable to connect Crown TCP control socket to "
+                f"{self.crown_subscribe_host}:{self.crown_subscribe_port}: {exc}"
+            )
+            self.crown_tcp_socket = None
+            return None
+
+    def _close_crown_tcp_socket(self) -> None:
+        """Close TCP socket used for Crown subscribe traffic."""
+        if self.crown_tcp_socket is None:
+            return
+
+        try:
+            self.crown_tcp_socket.close()
+        except OSError:
+            pass
+        finally:
+            self.crown_tcp_socket = None
 
     def _extract_udp_meter_level(self, payload: bytes) -> Optional[float]:
         """Parse a HiQnet MultiParamSet UDP frame and return the first parameter value.
@@ -1198,6 +1259,8 @@ class ScoreboardApp:
             self.crown_last_render_key = ""
             self.crown_last_frame_time = 0.0
             self.crown_last_subscribe_time = 0.0
+        else:
+            self._close_crown_tcp_socket()
 
         logger.info(
             f"Mode changed from '{previous_mode}' to '{normalized_mode}'"
@@ -1312,6 +1375,7 @@ class ScoreboardApp:
             self.mqtt_client.stop()
 
         self._close_crown_udp_socket()
+        self._close_crown_tcp_socket()
 
         if self.scoreboard:
             self.scoreboard.shutdown()
