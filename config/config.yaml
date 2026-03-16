@@ -100,7 +100,7 @@ crown:
   subscribe_sensor_rate_ms: 50
   subscribe_initial_update: 1
   udp_hex_byte_index: 0  # Which parsed hex byte maps to this single meter
-  meter_min_db: -60.0
+  meter_min_db: -40.0
   meter_max_db: 0.0
   marker_channel_id: 1  # 0 = auto-select most dynamic marker channel
   marker_offset_db: 48.0
