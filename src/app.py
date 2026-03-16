@@ -296,6 +296,7 @@ class ScoreboardApp:
         self.crown_udp_packet_log_counter = 0
         self.crown_udp_unparsed_log_counter = 0
         self.crown_marker_last_raw_by_channel: Dict[int, float] = {}
+        self.crown_marker_last_raw_by_signature: Dict[Tuple[int, int], float] = {}
         self.crown_last_marker_mapped_level: Optional[float] = None
         self.crown_last_marker_level_time = 0.0
 
@@ -948,7 +949,7 @@ class ScoreboardApp:
         import struct
 
         search = 0
-        candidates: List[Tuple[int, float, float]] = []
+        candidates: List[Tuple[int, int, float, float]] = []
         while True:
             marker = payload.find(b"\x10\x17", search)
             if marker < 0:
@@ -961,10 +962,18 @@ class ScoreboardApp:
                 search = marker + 1
                 continue
 
-            # Search for 0B 06 near channel marker and parse following big-endian float.
+            # Search for all 0B 06 fields near channel marker and parse following big-endian float.
             end = min(len(payload), marker + 128)
-            field = payload.find(b"\x0b\x06", marker, end)
-            if field != -1 and (field + 6) <= len(payload):
+            field_search = marker
+            while True:
+                field = payload.find(b"\x0b\x06", field_search, end)
+                if field == -1:
+                    break
+
+                field_search = field + 1
+                if (field + 6) > len(payload):
+                    continue
+
                 try:
                     raw = float(struct.unpack(">f", payload[field + 2 : field + 6])[0])
                 except (struct.error, ValueError, OverflowError):
@@ -978,7 +987,8 @@ class ScoreboardApp:
                         mapped_source = (raw - self.crown_marker_offset_db) * self.crown_marker_scale
 
                     mapped = max(self.crown_meter_min_db, min(self.crown_meter_max_db, mapped_source))
-                    candidates.append((channel_id, raw, mapped))
+                    signature = field - marker
+                    candidates.append((channel_id, signature, raw, mapped))
 
             search = marker + 1
 
@@ -987,30 +997,33 @@ class ScoreboardApp:
 
         if self.crown_marker_channel_id > 0:
             # Fixed channel mode: pick hottest value for configured channel.
-            selected = max(candidates, key=lambda item: item[2])
+            selected = max(candidates, key=lambda item: item[3])
         else:
-            # Auto mode: pick channel with highest short-term movement to surface active meter.
+            # Auto mode: pick signature (channel + nearby field offset) with highest
+            # short-term movement to surface the live meter field.
             selected = candidates[0]
             best_score = -1.0
-            for channel_id, raw, mapped in candidates:
-                previous = self.crown_marker_last_raw_by_channel.get(channel_id)
+            for channel_id, signature, raw, _mapped in candidates:
+                previous = self.crown_marker_last_raw_by_signature.get((channel_id, signature))
                 score = abs(raw - previous) if previous is not None else 0.0
                 if score > best_score:
                     best_score = score
-                    selected = (channel_id, raw, mapped)
+                    selected = (channel_id, signature, raw, _mapped)
 
-            for channel_id, raw, _mapped in candidates:
+            for channel_id, signature, raw, _mapped in candidates:
                 self.crown_marker_last_raw_by_channel[channel_id] = raw
+                self.crown_marker_last_raw_by_signature[(channel_id, signature)] = raw
 
         logger.debug(
-            "Crown marker FLOAT32: ch=%d raw=%.3f mapped=%.3f",
+            "Crown marker FLOAT32: ch=%d sig=%d raw=%.3f mapped=%.3f",
             selected[0],
             selected[1],
             selected[2],
+            selected[3],
         )
-        self.crown_last_marker_mapped_level = selected[2]
+        self.crown_last_marker_mapped_level = selected[3]
         self.crown_last_marker_level_time = time.time()
-        return selected[2]
+        return selected[3]
 
     def _extract_hiqnet_level_from_frame(self, payload: bytes, offset: int) -> Optional[float]:
         """Attempt to extract one meter value from a HiQnet MultiParamSet frame at offset."""

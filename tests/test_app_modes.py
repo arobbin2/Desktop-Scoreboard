@@ -269,6 +269,37 @@ class TestAppModes(unittest.TestCase):
         self.assertIsNotNone(level)
         self.assertAlmostEqual(level, -23.024, places=3)
 
+    def test_extract_marker_float_level_auto_prefers_dynamic_signature(self):
+        """Auto marker mode should pick the signature with the largest frame-to-frame change."""
+        import struct
+
+        self.app.crown_marker_channel_id = 0
+        self.app.crown_marker_offset_db = 48.0
+        self.app.crown_marker_scale = 1.0
+        self.app.crown_meter_min_db = -60.0
+        self.app.crown_meter_max_db = 0.0
+
+        packet_1 = (
+            b"\x10\x17\x01\x00\x0b\x06"
+            + struct.pack(">f", 42.0)
+            + b"\x00\x0b\x06"
+            + struct.pack(">f", 42.0)
+        )
+        packet_2 = (
+            b"\x10\x17\x01\x00\x0b\x06"
+            + struct.pack(">f", 42.0)
+            + b"\x00\x0b\x06"
+            + struct.pack(">f", 44.0)
+        )
+
+        level_1 = self.app._extract_marker_float_level(packet_1)
+        level_2 = self.app._extract_marker_float_level(packet_2)
+
+        self.assertIsNotNone(level_1)
+        self.assertIsNotNone(level_2)
+        self.assertAlmostEqual(level_1, -6.0, places=3)
+        self.assertAlmostEqual(level_2, -4.0, places=3)
+
     def test_parse_hex_payload_accepts_comma_and_space_formats(self):
         parsed = self.app._parse_hex_payload("02,19,00,FF")
         self.assertEqual(parsed, bytes([0x02, 0x19, 0x00, 0xFF]))
