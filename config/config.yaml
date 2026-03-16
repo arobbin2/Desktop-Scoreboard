@@ -105,8 +105,9 @@ crown:
   subscribe_tcp_assist_on_stale: true
   subscribe_tcp_assist_after_seconds: 3.0
   udp_hex_byte_index: 0  # Which parsed hex byte maps to this single meter
-  meter_min_db: -19.5
-  meter_max_db: -14.5
+  meter_min_db: -34.0
+  meter_max_db: -26.0
+  meter_calibration_db: -14.0  # Shift decoded meter values to align with amp front-panel dB reference
   marker_channel_id: 3  # 0 = auto-select most dynamic marker channel
   marker_offset_db: 48.0
   marker_scale: 1.0  # >1.0 expands movement if marker values are clustered near 0 dB

@@ -194,6 +194,10 @@ class ScoreboardApp:
         self.crown_udp_hex_byte_index = self._as_int(crown_config.get("udp_hex_byte_index"), fallback=0, minimum=0)
         self.crown_meter_min_db = self._as_float(crown_config.get("meter_min_db"), fallback=-60.0)
         self.crown_meter_max_db = self._as_float(crown_config.get("meter_max_db"), fallback=0.0)
+        self.crown_meter_calibration_db = self._as_float(
+            crown_config.get("meter_calibration_db"),
+            fallback=0.0,
+        )
         if self.crown_meter_max_db <= self.crown_meter_min_db:
             self.crown_meter_max_db = self.crown_meter_min_db + 1.0
         self.crown_marker_channel_id = self._as_int(
@@ -1637,18 +1641,21 @@ class ScoreboardApp:
         """Map decoded HiQnet numeric value to display dB range."""
         # FLOAT32/FLOAT64 are usually direct dB values.
         if datatype in {6, 7}:
-            return max(self.crown_meter_min_db, min(self.crown_meter_max_db, raw_value))
+            calibrated = raw_value + self.crown_meter_calibration_db
+            return max(self.crown_meter_min_db, min(self.crown_meter_max_db, calibrated))
 
         # Optional Soundweb London DI meter conversion for signed 32-bit raw values
         # in 0.0001 dB units (dB = raw / 10000). Keep disabled for Crown streams
         # unless explicitly requested.
         if self.crown_use_london_meter_scaling and datatype == 4 and -800000.0 <= raw_value <= 400000.0:
             mapped_from_raw = raw_value / 10000.0
-            return max(self.crown_meter_min_db, min(self.crown_meter_max_db, mapped_from_raw))
+            calibrated = mapped_from_raw + self.crown_meter_calibration_db
+            return max(self.crown_meter_min_db, min(self.crown_meter_max_db, calibrated))
 
         # If integer already looks like dB, trust it.
         if self.crown_meter_min_db <= raw_value <= self.crown_meter_max_db:
-            return raw_value
+            calibrated = raw_value + self.crown_meter_calibration_db
+            return max(self.crown_meter_min_db, min(self.crown_meter_max_db, calibrated))
 
         span = self.crown_meter_max_db - self.crown_meter_min_db
         if span <= 0:
@@ -1659,7 +1666,8 @@ class ScoreboardApp:
         max_raw = unsigned_max_by_type.get(datatype)
         if max_raw is not None and max_raw > 0:
             scaled = self.crown_meter_min_db + ((raw_value / max_raw) * span)
-            return max(self.crown_meter_min_db, min(self.crown_meter_max_db, scaled))
+            calibrated = scaled + self.crown_meter_calibration_db
+            return max(self.crown_meter_min_db, min(self.crown_meter_max_db, calibrated))
 
         # Signed integers fallback: normalize full signed range to [0,1].
         signed_range_by_type = {
@@ -1673,9 +1681,11 @@ class ScoreboardApp:
             normalized = (raw_value - min_raw) / (max_raw_signed - min_raw)
             normalized = max(0.0, min(1.0, normalized))
             scaled = self.crown_meter_min_db + (normalized * span)
-            return max(self.crown_meter_min_db, min(self.crown_meter_max_db, scaled))
+            calibrated = scaled + self.crown_meter_calibration_db
+            return max(self.crown_meter_min_db, min(self.crown_meter_max_db, calibrated))
 
-        return max(self.crown_meter_min_db, min(self.crown_meter_max_db, raw_value))
+        calibrated = raw_value + self.crown_meter_calibration_db
+        return max(self.crown_meter_min_db, min(self.crown_meter_max_db, calibrated))
 
     @staticmethod
     def _extract_hex_bytes_from_udp_payload(payload: bytes) -> List[int]:
