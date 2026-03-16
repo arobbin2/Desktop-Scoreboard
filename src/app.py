@@ -362,6 +362,9 @@ class ScoreboardApp:
             "frame": 0,
             "none": 0,
         }
+        self.crown_level_window_count = 0
+        self.crown_level_window_min: Optional[float] = None
+        self.crown_level_window_max: Optional[float] = None
         self.crown_marker_last_raw_by_channel: Dict[int, float] = {}
         self.crown_marker_last_raw_by_signature: Dict[Tuple[int, int], float] = {}
         self.crown_marker_activity_by_signature: Dict[Tuple[int, int], float] = {}
@@ -625,6 +628,11 @@ class ScoreboardApp:
             }
             self.crown_last_payload_time = now
             self.crown_udp_parsed_log_counter += 1
+            self.crown_level_window_count += 1
+            if self.crown_level_window_min is None or level < self.crown_level_window_min:
+                self.crown_level_window_min = level
+            if self.crown_level_window_max is None or level > self.crown_level_window_max:
+                self.crown_level_window_max = level
 
     def _maybe_log_crown_udp_stats(self, now: float) -> None:
         """Emit periodic Crown UDP ingest stats at INFO for field diagnostics."""
@@ -636,8 +644,16 @@ class ScoreboardApp:
         if self.crown_last_payload_time > 0:
             last_age = now - self.crown_last_payload_time
 
+        level_min = self.crown_level_window_min
+        level_max = self.crown_level_window_max
+        level_count = self.crown_level_window_count
+        if level_min is None or level_max is None:
+            level_summary = "n/a"
+        else:
+            level_summary = f"{level_min:.3f}..{level_max:.3f} ({level_count})"
+
         logger.info(
-            "Crown UDP stats: packets=%d parsed=%d unparsed=%d subscribe_tx=%d src(short=%d probe=%d frame=%d marker=%d none=%d) last_payload_age=%.2fs",
+            "Crown UDP stats: packets=%d parsed=%d unparsed=%d subscribe_tx=%d src(short=%d probe=%d frame=%d marker=%d none=%d) level_window=%s last_payload_age=%.2fs",
             self.crown_udp_packet_log_counter,
             self.crown_udp_parsed_log_counter,
             self.crown_udp_unparsed_log_counter,
@@ -647,8 +663,12 @@ class ScoreboardApp:
             self.crown_decode_source_counts.get("frame", 0),
             self.crown_decode_source_counts.get("marker", 0),
             self.crown_decode_source_counts.get("none", 0),
+            level_summary,
             last_age,
         )
+        self.crown_level_window_count = 0
+        self.crown_level_window_min = None
+        self.crown_level_window_max = None
 
     def _maybe_send_crown_subscribe(self, now: float, force: bool = False) -> None:
         """Send Crown subscribe packet using configured transport (udp|tcp)."""
