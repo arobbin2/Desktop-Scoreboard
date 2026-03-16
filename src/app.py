@@ -143,6 +143,24 @@ class ScoreboardApp:
             )
         )
         self.crown_subscribe_payload_bytes = self._parse_hex_payload(self.crown_subscribe_payload_hex)
+        self.crown_subscribe_use_subscribe_all_sensor = bool(
+            crown_config.get("subscribe_use_subscribe_all_sensor", False)
+        )
+        self.crown_subscribe_sensor_change_type = self._as_int(
+            crown_config.get("subscribe_sensor_change_type"),
+            fallback=2,
+            minimum=0,
+        )
+        self.crown_subscribe_sensor_rate_ms = self._as_int(
+            crown_config.get("subscribe_sensor_rate_ms"),
+            fallback=50,
+            minimum=1,
+        )
+        self.crown_subscribe_initial_update = self._as_int(
+            crown_config.get("subscribe_initial_update"),
+            fallback=1,
+            minimum=0,
+        )
         inferred_source_node = self._infer_source_node_from_subscribe_payload(self.crown_subscribe_payload_bytes)
         self.crown_source_node = self._as_int(crown_config.get("source_node"), fallback=inferred_source_node, minimum=1)
         self.crown_tcp_keepalive_interval_seconds = self._as_float(
@@ -504,7 +522,8 @@ class ScoreboardApp:
         if not self.crown_subscribe_enabled:
             return
 
-        if not self.crown_subscribe_host or not self.crown_subscribe_payload_bytes:
+        payload_bytes = self._resolve_crown_subscribe_payload()
+        if not self.crown_subscribe_host or not payload_bytes:
             return
 
         if (not force) and self.crown_last_subscribe_time > 0:
@@ -514,22 +533,22 @@ class ScoreboardApp:
 
         sent = False
         if self.crown_subscribe_transport == "tcp":
-            sent = self._send_crown_subscribe_tcp()
+            sent = self._send_crown_subscribe_tcp(payload_bytes)
         else:
-            sent = self._send_crown_subscribe_udp()
+            sent = self._send_crown_subscribe_udp(payload_bytes)
 
         if sent:
             self.crown_last_subscribe_time = now
             self.crown_subscribe_send_count += 1
 
-    def _send_crown_subscribe_udp(self) -> bool:
+    def _send_crown_subscribe_udp(self, payload_bytes: bytes) -> bool:
         """Send subscribe payload over UDP from the bound listener socket."""
         if self.crown_udp_socket is None:
             return False
 
         try:
             self.crown_udp_socket.sendto(
-                self.crown_subscribe_payload_bytes,
+                payload_bytes,
                 (self.crown_subscribe_host, self.crown_subscribe_port),
             )
             if self.crown_subscribe_send_count == 0:
@@ -546,14 +565,14 @@ class ScoreboardApp:
             )
             return False
 
-    def _send_crown_subscribe_tcp(self) -> bool:
+    def _send_crown_subscribe_tcp(self, payload_bytes: bytes) -> bool:
         """Send subscribe payload over TCP, reusing a socket when configured."""
         tcp_socket = self._ensure_crown_tcp_socket()
         if tcp_socket is None:
             return False
 
         try:
-            tcp_socket.sendall(self.crown_subscribe_payload_bytes)
+            tcp_socket.sendall(payload_bytes)
             if self.crown_subscribe_send_count == 0:
                 logger.info(
                     "Sent Crown subscribe packet via TCP to "
@@ -755,6 +774,49 @@ class ScoreboardApp:
         source_node = int(self.crown_source_node) & 0xFFFF
         serial[-2:] = source_node.to_bytes(2, "big")
         return bytes(serial)
+
+    def _resolve_crown_subscribe_payload(self) -> bytes:
+        """Return configured payload or generated SubscribeAll-sensor payload."""
+        if self.crown_subscribe_use_subscribe_all_sensor:
+            generated = self._build_subscribe_all_sensor_payload()
+            if generated:
+                return generated
+        return self.crown_subscribe_payload_bytes
+
+    def _build_subscribe_all_sensor_payload(self) -> bytes:
+        """Build HiQnet ParamSubscribeAll (0x0113) from configured source/destination addresses."""
+        base = self.crown_subscribe_payload_bytes
+        if len(base) < 25 or base[0] != 0x02:
+            return b""
+
+        source_address = bytes(base[6:12])
+        destination_address = bytes(base[12:18])
+        destination_vd_object = bytes(base[14:18])
+
+        frame = bytearray()
+        frame.extend([0x02, 0x19])
+        frame.extend((36).to_bytes(4, "big"))
+        frame.extend(source_address)
+        frame.extend(destination_address)
+        frame.extend((0x0113).to_bytes(2, "big"))
+        frame.extend((0x0020).to_bytes(2, "big"))
+        frame.extend((5).to_bytes(1, "big"))
+        frame.extend((self.crown_tcp_sequence & 0xFFFF).to_bytes(2, "big"))
+        frame.extend((int(self.crown_source_node) & 0xFFFF).to_bytes(2, "big"))
+        frame.extend(destination_vd_object)
+        frame.extend((int(self.crown_subscribe_sensor_change_type) & 0xFF).to_bytes(1, "big"))
+        frame.extend((int(self.crown_subscribe_sensor_rate_ms) & 0xFFFF).to_bytes(2, "big"))
+        frame.extend((int(self.crown_subscribe_initial_update) & 0xFFFF).to_bytes(2, "big"))
+        self.crown_tcp_sequence = (self.crown_tcp_sequence + 1) & 0xFFFF
+
+        logger.debug(
+            "Built Crown SubscribeAll-sensor payload: source_node=%d change_type=%d sensor_rate_ms=%d initial_update=%d",
+            self.crown_source_node,
+            self.crown_subscribe_sensor_change_type,
+            self.crown_subscribe_sensor_rate_ms,
+            self.crown_subscribe_initial_update,
+        )
+        return bytes(frame)
 
     def _extract_udp_meter_level(self, payload: bytes) -> Optional[float]:
         """Parse a HiQnet MultiParamSet UDP frame and return the first parameter value.
