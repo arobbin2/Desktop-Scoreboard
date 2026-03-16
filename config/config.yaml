@@ -115,6 +115,7 @@ crown:
   probe_use_best_offset: false  # Use the most active float offset as meter source
   probe_log_interval_seconds: 2.0
   probe_min_activity: 0.01
+  prefer_hiqnet_frame_over_marker: true
   udp_stats_log_interval_seconds: 2.0
   use_london_meter_scaling: false  # Soundweb London raw/10000 conversion; usually false for Crown streams
   target_param_id: 6  # preferred param in 0x0101 updates (e.g., 6=Power, 4=RMS Amp, 1=RMS Level)

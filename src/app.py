@@ -231,6 +231,9 @@ class ScoreboardApp:
             fallback=0.01,
             minimum=0.0,
         )
+        self.crown_prefer_hiqnet_frame_over_marker = bool(
+            crown_config.get("prefer_hiqnet_frame_over_marker", False)
+        )
         self.crown_udp_stats_log_interval_seconds = self._as_float(
             crown_config.get("udp_stats_log_interval_seconds"),
             fallback=2.0,
@@ -1051,9 +1054,10 @@ class ScoreboardApp:
         if probe_level is not None:
             return probe_level
 
-        marker_level = self._extract_marker_float_level(payload)
-        if marker_level is not None:
-            return marker_level
+        if not self.crown_prefer_hiqnet_frame_over_marker:
+            marker_level = self._extract_marker_float_level(payload)
+            if marker_level is not None:
+                return marker_level
 
         # Try as a direct frame first.
         direct_level = self._extract_hiqnet_level_from_frame(payload, 0)
@@ -1061,6 +1065,8 @@ class ScoreboardApp:
             # Some streams interleave dynamic marker frames with flat 0x0101=0.000
             # updates; avoid clobbering a recent active marker sample with zeros.
             if (
+                (not self.crown_prefer_hiqnet_frame_over_marker)
+                and
                 abs(direct_level) < 0.001
                 and self.crown_last_marker_mapped_level is not None
                 and (time.time() - self.crown_last_marker_level_time) < 0.3
@@ -1076,12 +1082,14 @@ class ScoreboardApp:
         # Some devices batch/encapsulate multiple frames in one datagram; scan for version byte.
         # Header length is not always 0x19, so we try each plausible frame start.
         scan_limit = max(0, len(payload) - 25)
-        for marker in range(scan_limit + 1):
-            if payload[marker] != 0x02:
+        for frame_start in range(scan_limit + 1):
+            if payload[frame_start] != 0x02:
                 continue
-            embedded_level = self._extract_hiqnet_level_from_frame(payload, marker)
+            embedded_level = self._extract_hiqnet_level_from_frame(payload, frame_start)
             if embedded_level is not None:
                 if (
+                    (not self.crown_prefer_hiqnet_frame_over_marker)
+                    and
                     abs(embedded_level) < 0.001
                     and self.crown_last_marker_mapped_level is not None
                     and (time.time() - self.crown_last_marker_level_time) < 0.3
@@ -1093,6 +1101,11 @@ class ScoreboardApp:
                     )
                     continue
                 return embedded_level
+
+        if self.crown_prefer_hiqnet_frame_over_marker:
+            marker_level = self._extract_marker_float_level(payload)
+            if marker_level is not None:
+                return marker_level
 
         if len(payload) < 34:
             logger.debug("Crown UDP short payload ignored: len=%d", len(payload))
