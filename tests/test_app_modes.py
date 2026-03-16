@@ -300,6 +300,14 @@ class TestAppModes(unittest.TestCase):
         self.assertAlmostEqual(level_1, -6.0, places=3)
         self.assertAlmostEqual(level_2, -4.0, places=3)
 
+    def test_map_hiqnet_raw_to_meter_db_uses_audio_architect_meter_scaling(self):
+        """Signed 32-bit meter raw should convert with dB = raw / 10000."""
+        self.app.crown_meter_min_db = -60.0
+        self.app.crown_meter_max_db = 0.0
+
+        mapped = self.app._map_hiqnet_raw_to_meter_db(-148000.0, 4)
+        self.assertAlmostEqual(mapped, -14.8, places=3)
+
     def test_parse_hex_payload_accepts_comma_and_space_formats(self):
         parsed = self.app._parse_hex_payload("02,19,00,FF")
         self.assertEqual(parsed, bytes([0x02, 0x19, 0x00, 0xFF]))
