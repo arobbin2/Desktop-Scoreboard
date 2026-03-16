@@ -843,7 +843,7 @@ class ScoreboardApp:
             self._handle_crown_tcp_response(response)
 
     def _handle_crown_tcp_response(self, payload: bytes) -> None:
-        """Handle HiQnet TCP frames; currently logs headers and refuses Hello sessions."""
+        """Handle HiQnet TCP frames, including direct meter extraction."""
         if len(payload) < 25 or payload[0] != 0x02:
             logger.debug("Crown TCP response: len=%d", len(payload))
             return
@@ -863,6 +863,18 @@ class ScoreboardApp:
             flags,
             seq,
         )
+
+        level = self._extract_udp_meter_level(payload)
+        if level is not None:
+            now = time.time()
+            self.crown_meter_state = {
+                "levels": [level],
+                "updated_at": now,
+                "status_text": "tcp-live",
+            }
+            self.crown_last_payload_time = now
+            self.crown_udp_parsed_log_counter += 1
+            logger.info("Crown TCP parsed meter: mapped=%.3f", level)
 
         # Message ID 0x0008 is HiQnet Hello session request; refuse session to stay session-less.
         if msg_id == 0x0008:

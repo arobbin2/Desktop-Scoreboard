@@ -88,7 +88,7 @@ crown:
   udp_bind_port: 10001
   subscribe_enabled: true
   subscribe_host: 10.255.40.23
-  subscribe_transport: udp  # udp (legacy) or tcp (HiQnet guide path)
+  subscribe_transport: tcp  # udp (legacy) or tcp (HiQnet guide path)
   subscribe_tcp_persistent: true
   source_node: 51
   tcp_keepalive_interval_seconds: 5.0
