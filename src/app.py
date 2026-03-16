@@ -1026,7 +1026,7 @@ class ScoreboardApp:
                     f"off={offset} raw={raw:.3f} mapped={mapped:.3f} act={activity:.5f}"
                 )
             if top_parts:
-                logger.debug("Crown float offset activity top: %s", " | ".join(top_parts))
+                logger.info("Crown float offset activity top: %s", " | ".join(top_parts))
                 self.crown_last_probe_log_time = now
 
         if not self.crown_probe_use_best_offset:
@@ -1040,7 +1040,7 @@ class ScoreboardApp:
         if best_activity < self.crown_probe_min_activity:
             return None
 
-        logger.debug(
+        logger.info(
             "Crown float offset selected: off=%d raw=%.3f mapped=%.3f act=%.5f",
             best_offset,
             best_raw,
@@ -1147,7 +1147,7 @@ class ScoreboardApp:
                     f"ch={channel_id} sig={signature} raw={raw:.3f} mapped={mapped:.3f} act={activity:.5f}"
                 )
             if top_parts:
-                logger.debug("Crown marker activity top: %s", " | ".join(top_parts))
+                logger.info("Crown marker activity top: %s", " | ".join(top_parts))
                 self.crown_last_marker_activity_log_time = now
 
         logger.debug(

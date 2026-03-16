@@ -39,7 +39,7 @@ app:
 
 # Mode Management
 modes:
-  default_mode: scoreboard  # scoreboard | clock | rss | cubs | crown
+  default_mode: crown  # scoreboard | clock | rss | cubs | crown
 
 # Clock Display Configuration
 clock:
@@ -81,7 +81,7 @@ cubs:
 
 # Crown Amplifier Live Meter Mode
 crown:
-  enabled: false  # Keep false until Crown feed is validated
+  enabled: true  # Keep true while validating Crown feed diagnostics
   meter_topic: scoreboard/crown/meter
   udp_enabled: true
   udp_bind_host: 0.0.0.0
@@ -114,5 +114,5 @@ crown:
   target_param_id: 6  # preferred param in 0x0101 updates (e.g., 6=Power, 4=RMS Amp, 1=RMS Level)
   frame_interval_seconds: 0.1
   stale_after_seconds: 5.0
-  fallback_to_scoreboard_on_stale: true
+  fallback_to_scoreboard_on_stale: false
   waiting_text: "CROWN WAIT"
