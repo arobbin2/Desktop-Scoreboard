@@ -143,6 +143,13 @@ class ScoreboardApp:
             )
         )
         self.crown_subscribe_payload_bytes = self._parse_hex_payload(self.crown_subscribe_payload_hex)
+        inferred_source_node = self._infer_source_node_from_subscribe_payload(self.crown_subscribe_payload_bytes)
+        self.crown_source_node = self._as_int(crown_config.get("source_node"), fallback=inferred_source_node, minimum=1)
+        self.crown_tcp_keepalive_interval_seconds = self._as_float(
+            crown_config.get("tcp_keepalive_interval_seconds"),
+            fallback=5.0,
+            minimum=1.0,
+        )
         self.crown_udp_hex_byte_index = self._as_int(crown_config.get("udp_hex_byte_index"), fallback=0, minimum=0)
         self.crown_meter_min_db = self._as_float(crown_config.get("meter_min_db"), fallback=-60.0)
         self.crown_meter_max_db = self._as_float(crown_config.get("meter_max_db"), fallback=0.0)
@@ -246,6 +253,8 @@ class ScoreboardApp:
         self.crown_udp_bound_address = ""
         self.crown_last_subscribe_time = 0.0
         self.crown_subscribe_send_count = 0
+        self.crown_last_tcp_keepalive_time = 0.0
+        self.crown_tcp_sequence = 1
 
         # Set up signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -402,6 +411,7 @@ class ScoreboardApp:
         if self.crown_udp_enabled:
             self._ensure_crown_udp_socket()
             self._maybe_send_crown_subscribe(now)
+            self._maybe_send_crown_tcp_keepalive(now)
             self._poll_crown_udp_packets()
 
         if (now - self.crown_last_frame_time) < self.crown_frame_interval_seconds:
@@ -550,20 +560,9 @@ class ScoreboardApp:
                     f"{self.crown_subscribe_host}:{self.crown_subscribe_port}"
                 )
 
-            # Best effort read keeps session alive and surfaces immediate protocol errors.
-            if self.crown_subscribe_tcp_persistent:
-                try:
-                    tcp_socket.settimeout(0.05)
-                    response = tcp_socket.recv(4096)
-                    if response:
-                        logger.debug("Crown TCP response: len=%d", len(response))
-                except TimeoutError:
-                    pass
-                except OSError:
-                    pass
-                finally:
-                    tcp_socket.settimeout(None)
-            else:
+            self._poll_crown_tcp_responses(max_frames=4)
+
+            if not self.crown_subscribe_tcp_persistent:
                 self._close_crown_tcp_socket()
 
             return True
@@ -588,6 +587,9 @@ class ScoreboardApp:
                 "Connected Crown TCP control socket to "
                 f"{self.crown_subscribe_host}:{self.crown_subscribe_port}"
             )
+            self._send_crown_discovery_message(info_bit=False)
+            self.crown_last_tcp_keepalive_time = time.time()
+            self._poll_crown_tcp_responses(max_frames=2)
             return tcp_socket
         except OSError as exc:
             logger.warning(
@@ -608,6 +610,151 @@ class ScoreboardApp:
             pass
         finally:
             self.crown_tcp_socket = None
+
+    def _maybe_send_crown_tcp_keepalive(self, now: float) -> None:
+        """Send HiQnet keepalive over TCP while connected in crown mode."""
+        if self.crown_subscribe_transport != "tcp":
+            return
+
+        if self.crown_tcp_socket is None:
+            return
+
+        if (now - self.crown_last_tcp_keepalive_time) < self.crown_tcp_keepalive_interval_seconds:
+            return
+
+        if self._send_crown_discovery_message(info_bit=True):
+            self.crown_last_tcp_keepalive_time = now
+
+        self._poll_crown_tcp_responses(max_frames=3)
+
+    def _poll_crown_tcp_responses(self, max_frames: int = 4) -> None:
+        """Read and process a few pending TCP control frames from the Crown device."""
+        if self.crown_tcp_socket is None:
+            return
+
+        for _ in range(max_frames):
+            try:
+                self.crown_tcp_socket.settimeout(0.01)
+                response = self.crown_tcp_socket.recv(4096)
+            except TimeoutError:
+                return
+            except OSError:
+                return
+            finally:
+                if self.crown_tcp_socket is not None:
+                    self.crown_tcp_socket.settimeout(None)
+
+            if not response:
+                return
+
+            self._handle_crown_tcp_response(response)
+
+    def _handle_crown_tcp_response(self, payload: bytes) -> None:
+        """Handle HiQnet TCP frames; currently logs headers and refuses Hello sessions."""
+        if len(payload) < 25 or payload[0] != 0x02:
+            logger.debug("Crown TCP response: len=%d", len(payload))
+            return
+
+        header_len = payload[1]
+        if header_len < 25 or len(payload) < header_len:
+            logger.debug("Crown TCP malformed header: len=%d header_len=%d", len(payload), header_len)
+            return
+
+        msg_id = int.from_bytes(payload[18:20], "big")
+        flags = int.from_bytes(payload[20:22], "big")
+        seq = int.from_bytes(payload[23:25], "big")
+        logger.debug(
+            "Crown TCP response: len=%d msg_id=0x%04X flags=0x%04X seq=%d",
+            len(payload),
+            msg_id,
+            flags,
+            seq,
+        )
+
+        # Message ID 0x0008 is HiQnet Hello session request; refuse session to stay session-less.
+        if msg_id == 0x0008:
+            self._send_crown_hello_refusal(payload)
+
+    def _send_crown_hello_refusal(self, hello_payload: bytes) -> None:
+        """Reply to a HiQnet Hello request with an error header to refuse sessions."""
+        if self.crown_tcp_socket is None or len(hello_payload) < 25:
+            return
+
+        seq = hello_payload[23:25]
+        source_addr = hello_payload[12:18]  # swap src/dst
+        destination_addr = hello_payload[6:12]
+
+        response = bytearray()
+        response.extend([0x02, 0x1D])  # version=2, header_len=29
+        response.extend((29).to_bytes(4, "big"))
+        response.extend(source_addr)
+        response.extend(destination_addr)
+        response.extend((0x0008).to_bytes(2, "big"))
+        response.extend((0x002C).to_bytes(2, "big"))  # guaranteed + error + info
+        response.extend((5).to_bytes(1, "big"))
+        response.extend(seq)
+        response.extend((2).to_bytes(2, "big"))  # error length
+        response.extend((0).to_bytes(2, "big"))  # error code 0
+
+        try:
+            self.crown_tcp_socket.sendall(bytes(response))
+            logger.debug("Sent Crown Hello refusal (session-less mode)")
+        except OSError as exc:
+            logger.warning(f"Unable to send Crown Hello refusal: {exc}")
+
+    def _send_crown_discovery_message(self, info_bit: bool) -> bool:
+        """Send HiQnet Discovery (or KeepAlive when info_bit=True) over TCP."""
+        if self.crown_tcp_socket is None:
+            return False
+
+        flags = 0x0024 if info_bit else 0x0020
+
+        payload = bytearray()
+        payload.extend(int(self.crown_source_node).to_bytes(2, "big"))  # node
+        payload.extend((1).to_bytes(1, "big"))  # cost
+        payload.extend((16).to_bytes(2, "big"))  # serial length
+        payload.extend(self._build_discovery_serial_16())  # serial (16 bytes)
+        payload.extend((1048576).to_bytes(4, "big"))  # max message size
+        payload.extend((10000).to_bytes(2, "big"))  # keepalive ms
+        payload.extend((1).to_bytes(1, "big"))  # network id
+        payload.extend(bytes([0, 0, 0, 0, 0, 0]))  # mac
+        payload.extend((1).to_bytes(1, "big"))  # dhcp
+        payload.extend(bytes([0, 0, 0, 0]))  # ip
+        payload.extend(bytes([0, 0, 0, 0]))  # subnet
+        payload.extend(bytes([0, 0, 0, 0]))  # gateway
+
+        frame = bytearray()
+        frame.extend([0x02, 0x19])  # version=2, header_len=25
+        frame.extend((72).to_bytes(4, "big"))  # total message length
+        frame.extend(int(self.crown_source_node).to_bytes(2, "big"))
+        frame.extend((0).to_bytes(4, "big"))
+        frame.extend((0).to_bytes(2, "big"))  # discovery destination node
+        frame.extend((0).to_bytes(4, "big"))
+        frame.extend((0x0000).to_bytes(2, "big"))  # discovery msg id
+        frame.extend(flags.to_bytes(2, "big"))
+        frame.extend((5).to_bytes(1, "big"))
+        frame.extend((self.crown_tcp_sequence & 0xFFFF).to_bytes(2, "big"))
+        frame.extend(payload)
+
+        self.crown_tcp_sequence = (self.crown_tcp_sequence + 1) & 0xFFFF
+
+        try:
+            self.crown_tcp_socket.sendall(bytes(frame))
+            if info_bit:
+                logger.debug("Sent Crown TCP keepalive discovery frame")
+            else:
+                logger.debug("Sent Crown TCP discovery frame")
+            return True
+        except OSError as exc:
+            logger.warning(f"Unable to send Crown TCP discovery frame: {exc}")
+            return False
+
+    def _build_discovery_serial_16(self) -> bytes:
+        """Build a stable 16-byte serial value for HiQnet discovery payload."""
+        serial = bytearray(16)
+        source_node = int(self.crown_source_node) & 0xFFFF
+        serial[-2:] = source_node.to_bytes(2, "big")
+        return bytes(serial)
 
     def _extract_udp_meter_level(self, payload: bytes) -> Optional[float]:
         """Parse a HiQnet MultiParamSet UDP frame and return the first parameter value.
@@ -758,6 +905,13 @@ class ScoreboardApp:
         except ValueError:
             logger.warning("Invalid crown.subscribe_payload_hex; unable to parse hex bytes")
             return b""
+
+    @staticmethod
+    def _infer_source_node_from_subscribe_payload(payload: bytes) -> int:
+        """Infer HiQnet source node from message bytes, defaulting to 51."""
+        if len(payload) >= 8 and payload[0] == 0x02 and payload[1] >= 0x19:
+            return int.from_bytes(payload[6:8], "big") or 51
+        return 51
 
     @staticmethod
     def _format_crown_levels_text(levels: List[float]) -> str:
