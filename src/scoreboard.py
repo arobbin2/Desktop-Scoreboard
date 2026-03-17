@@ -199,13 +199,14 @@ class LEDScoreboard:
         min_db: float = -60.0,
         max_db: float = 0.0,
         color: tuple = (0, 255, 255),
+        bar_colors: Optional[List[tuple]] = None,
     ) -> None:
-        """Display up to 4 stacked channel meters (C1..C4)."""
-        values = [float(v) for v in levels_db[:4]]
+        """Display up to 8 stacked channel meters."""
+        values = [float(v) for v in levels_db[:8]]
         self.current_data = {
             "meter_levels_db": values,
         }
-        self._render_multi_meter(values, min_db=min_db, max_db=max_db, color=color)
+        self._render_multi_meter(values, min_db=min_db, max_db=max_db, color=color, bar_colors=bar_colors)
 
     def _render_text(self, text: str, color: tuple = (255, 0, 0)) -> None:
         """Render text to the matrix"""
@@ -690,8 +691,9 @@ class LEDScoreboard:
         min_db: float = -60.0,
         max_db: float = 0.0,
         color: tuple = (0, 0, 255),
+        bar_colors: Optional[List[tuple]] = None,
     ) -> None:
-        """Render four vertical meters (5px wide, no labels) for channel monitoring."""
+        """Render up to 8 vertical meters (5px wide, no labels) for channel monitoring."""
         if self.matrix is None:
             logger.info(f"Mock display multi meter: {levels_db}")
             return
@@ -700,7 +702,7 @@ class LEDScoreboard:
             image = Image.new("RGB", (self.width, self.height), color=(0, 0, 0))
             draw = ImageDraw.Draw(image)
 
-            count = max(1, min(4, len(levels_db)))
+            count = max(1, min(8, len(levels_db)))
             bar_width = 5
             gap = 2
             top_margin = 1
@@ -727,7 +729,12 @@ class LEDScoreboard:
                 # Level fill from bottom upward
                 if fill_height > 0:
                     fill_top = bar_bottom - fill_height + 1
-                    draw.rectangle([(x, fill_top), (bar_right, bar_bottom)], fill=color)
+                    resolved_color = color
+                    if isinstance(bar_colors, list) and idx < len(bar_colors):
+                        candidate = bar_colors[idx]
+                        if isinstance(candidate, tuple) and len(candidate) == 3:
+                            resolved_color = candidate
+                    draw.rectangle([(x, fill_top), (bar_right, bar_bottom)], fill=resolved_color)
 
             self.matrix.SetImage(image)
             logger.debug("Rendered multi meter channels")
