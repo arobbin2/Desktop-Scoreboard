@@ -126,6 +126,7 @@ crown:
   udp_stats_log_interval_seconds: 2.0
   use_london_meter_scaling: false  # Soundweb London raw/10000 conversion; usually false for Crown streams
   target_param_id: 6  # preferred param in 0x0101 updates (e.g., 6=Power, 4=RMS Amp, 1=RMS Level)
+  input_target_param_id: 1  # preferred param for analog input objects (1.8.x)
   frame_interval_seconds: 0.06
   stale_after_seconds: 5.0
   fallback_to_scoreboard_on_stale: false

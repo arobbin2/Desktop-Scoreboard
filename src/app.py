@@ -263,6 +263,11 @@ class ScoreboardApp:
             fallback=6,
             minimum=0,
         )
+        self.crown_input_target_param_id = self._as_int(
+            crown_config.get("input_target_param_id"),
+            fallback=self.crown_target_param_id,
+            minimum=0,
+        )
         self.crown_use_london_meter_scaling = bool(
             crown_config.get("use_london_meter_scaling", False)
         )
@@ -1551,9 +1556,12 @@ class ScoreboardApp:
         if header_len < 25 or len(payload) < (offset + header_len + 3):
             return None
 
+        message_len = struct.unpack(">I", payload[offset + 2 : offset + 6])[0]
+        frame_end = min(len(payload), offset + max(header_len, message_len))
+
         msg_id = struct.unpack(">H", payload[offset + 18 : offset + 20])[0]
         if msg_id == 0x0101:
-            level_0101 = self._extract_hiqnet_level_from_0101(payload, offset, header_len)
+            level_0101 = self._extract_hiqnet_level_from_0101(payload, offset, header_len, frame_end)
             if level_0101 is not None:
                 return level_0101
             return None
@@ -1566,9 +1574,6 @@ class ScoreboardApp:
         if stream_resolution is None:
             return None
         stream_kind, channel_id = stream_resolution
-
-        message_len = struct.unpack(">I", payload[offset + 2 : offset + 6])[0]
-        frame_end = min(len(payload), offset + max(header_len, message_len))
 
         p = offset + header_len
         if p + 2 > frame_end:
@@ -1610,11 +1615,16 @@ class ScoreboardApp:
 
         return None
 
-    def _extract_hiqnet_level_from_0101(self, payload: bytes, offset: int, header_len: int) -> Optional[float]:
+    def _extract_hiqnet_level_from_0101(
+        self,
+        payload: bytes,
+        offset: int,
+        header_len: int,
+        frame_end: int,
+    ) -> Optional[float]:
         """Parse Crown 0x0101 update frames carrying object + repeated param/type/value tuples."""
         import struct
 
-        frame_end = len(payload)
         p = offset + header_len
         if p + 6 > frame_end:
             return None
@@ -1630,11 +1640,12 @@ class ScoreboardApp:
         if stream_resolution is None:
             return None
         stream_kind, channel_id = stream_resolution
+        stream_target_param_id = self._preferred_crown_target_param_id(stream_kind)
 
         # Fast path for observed Crown 0x0101 layout: look for exact tuple marker
         # [param_id:2][datatype:1][value:n]. This avoids misalignment issues in
         # mixed-type payloads where optional bytes may appear between tuples.
-        preferred_params = [self.crown_target_param_id, 6, 4, 3, 1, 0]
+        preferred_params = [stream_target_param_id, 6, 4, 3, 1, 0]
         seen: set[int] = set()
         ordered_params: List[int] = []
         for param_id in preferred_params:
@@ -1674,8 +1685,8 @@ class ScoreboardApp:
 
         if marker_candidates:
             selected_param = (
-                self.crown_target_param_id
-                if self.crown_target_param_id in marker_candidates
+                stream_target_param_id
+                if stream_target_param_id in marker_candidates
                 else next(iter(marker_candidates.keys()))
             )
             selected_dtype, selected_value, selected_raw = marker_candidates[selected_param]
@@ -1705,7 +1716,8 @@ class ScoreboardApp:
                     fallback_dtype, fallback_value, fallback_raw = fallback
                     if abs(fallback_value) >= 0.001:
                         logger.debug(
-                            "Crown UDP 0x0101 fallback: obj=0x%08X target_param=%d target_mapped=%.3f using_param=%d mapped=%.3f",
+                            "Crown UDP 0x0101 fallback: stream=%s obj=0x%08X target_param=%d target_mapped=%.3f using_param=%d mapped=%.3f",
+                            stream_kind,
                             object_id,
                             selected_param,
                             selected_value,
@@ -1733,7 +1745,8 @@ class ScoreboardApp:
             ):
                 dynamic_dtype, dynamic_value, dynamic_raw = marker_candidates[dynamic_param]
                 logger.debug(
-                    "Crown UDP 0x0101 dynamic: obj=0x%08X selected_param=%d activity=%.5f using_param=%d activity=%.5f mapped=%.3f",
+                    "Crown UDP 0x0101 dynamic: stream=%s obj=0x%08X selected_param=%d activity=%.5f using_param=%d activity=%.5f mapped=%.3f",
+                    stream_kind,
                     object_id,
                     selected_param,
                     selected_activity,
@@ -1747,7 +1760,8 @@ class ScoreboardApp:
                 selected_raw = dynamic_raw
 
             logger.debug(
-                "Crown UDP 0x0101: obj=0x%08X selected_param=%d datatype=%d mapped=%.3f",
+                "Crown UDP 0x0101: stream=%s obj=0x%08X selected_param=%d datatype=%d mapped=%.3f",
+                stream_kind,
                 object_id,
                 selected_param,
                 selected_dtype,
@@ -1779,7 +1793,7 @@ class ScoreboardApp:
 
         selected: Optional[Tuple[int, int, float]] = None
         for item in candidates:
-            if item[0] == self.crown_target_param_id:
+            if item[0] == stream_target_param_id:
                 selected = item
                 break
         if selected is None:
@@ -1788,7 +1802,8 @@ class ScoreboardApp:
             selected = sorted(candidates, key=lambda item: priority.get(item[0], 99))[0]
 
         logger.debug(
-            "Crown UDP 0x0101: obj=0x%08X selected_param=%d datatype=%d mapped=%.3f",
+            "Crown UDP 0x0101: stream=%s obj=0x%08X selected_param=%d datatype=%d mapped=%.3f",
+            stream_kind,
             object_id,
             selected[0],
             selected[1],
@@ -1796,6 +1811,12 @@ class ScoreboardApp:
         )
         self._apply_crown_channel_level(channel_id, selected[2], stream_kind)
         return selected[2]
+
+    def _preferred_crown_target_param_id(self, stream_kind: str) -> int:
+        """Return stream-specific preferred HiQnet param id."""
+        if str(stream_kind).strip().lower() == "input":
+            return int(self.crown_input_target_param_id)
+        return int(self.crown_target_param_id)
 
     @staticmethod
     def _hiqnet_datatype_size(datatype: int) -> int:
