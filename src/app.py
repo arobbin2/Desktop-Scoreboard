@@ -281,7 +281,7 @@ class ScoreboardApp:
         )
         self.crown_waiting_text = str(crown_config.get("waiting_text", "CROWN WAIT")).strip() or "CROWN WAIT"
         self.crown_meter_color = self._parse_rgb_tuple(
-            crown_config.get("meter_color", crown_config.get("color", [0, 50, 255])),
+            crown_config.get("meter_color", crown_config.get("color", [0, 100, 255])),
             fallback=(0, 255, 255),
         )
 
