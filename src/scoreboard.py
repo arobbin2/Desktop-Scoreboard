@@ -691,7 +691,7 @@ class LEDScoreboard:
         max_db: float = 0.0,
         color: tuple = (0, 255, 255),
     ) -> None:
-        """Render four compact horizontal meters for channel monitoring."""
+        """Render four vertical meters (5px wide, no labels) for channel monitoring."""
         if self.matrix is None:
             logger.info(f"Mock display multi meter: {levels_db}")
             return
@@ -700,48 +700,34 @@ class LEDScoreboard:
             image = Image.new("RGB", (self.width, self.height), color=(0, 0, 0))
             draw = ImageDraw.Draw(image)
 
-            try:
-                label_font = ImageFont.truetype(
-                    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-                    7,
-                )
-            except OSError:
-                label_font = ImageFont.load_default()
-
             count = max(1, min(4, len(levels_db)))
+            bar_width = 5
+            gap = 2
             top_margin = 1
-            row_height = max(6, (self.height - top_margin - 1) // count)
-            label_width = 18
-            meter_left = label_width
-            meter_right = self.width - 2
-            meter_width = max(1, meter_right - meter_left)
+            bottom_margin = 1
+            total_bar_area = count * bar_width + (count - 1) * gap
+            x_start = (self.width - total_bar_area) // 2
+            bar_top = top_margin
+            bar_bottom = self.height - 1 - bottom_margin
+            meter_height = max(1, bar_bottom - bar_top)
             span = max(0.001, float(max_db - min_db))
 
             for idx in range(count):
                 level = float(levels_db[idx])
                 clamped = max(min_db, min(max_db, level))
                 normalized = (clamped - min_db) / span
-                fill_width = int(round(normalized * meter_width))
+                fill_height = int(round(normalized * meter_height))
 
-                y = top_margin + (idx * row_height)
-                label = f"C{idx + 1}"
-                draw.text((1, y), label, fill=(255, 255, 255), font=label_font)
+                x = x_start + idx * (bar_width + gap)
+                bar_right = x + bar_width - 1
 
-                bar_top = y + 1
-                bar_bottom = min(self.height - 1, y + row_height - 2)
-                draw.rectangle(
-                    [(meter_left, bar_top), (meter_right, bar_bottom)],
-                    outline=(40, 40, 40),
-                    fill=(5, 5, 5),
-                )
-                if fill_width > 0:
-                    draw.rectangle(
-                        [
-                            (meter_left + 1, bar_top + 1),
-                            (meter_left + min(fill_width, meter_width) - 1, bar_bottom - 1),
-                        ],
-                        fill=color,
-                    )
+                # Dim background track
+                draw.rectangle([(x, bar_top), (bar_right, bar_bottom)], fill=(5, 5, 5))
+
+                # Level fill from bottom upward
+                if fill_height > 0:
+                    fill_top = bar_bottom - fill_height + 1
+                    draw.rectangle([(x, fill_top), (bar_right, bar_bottom)], fill=color)
 
             self.matrix.SetImage(image)
             logger.debug("Rendered multi meter channels")
