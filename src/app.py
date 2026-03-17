@@ -395,6 +395,12 @@ class ScoreboardApp:
             "frame": 0,
             "none": 0,
         }
+        self.crown_stream_frame_counts: Dict[str, int] = {
+            "input": 0,
+            "output": 0,
+        }
+        self.crown_seen_input_object_hits: Dict[int, int] = {}
+        self.crown_seen_output_object_hits: Dict[int, int] = {}
         self.crown_level_window_count = 0
         self.crown_level_window_min: Optional[float] = None
         self.crown_level_window_max: Optional[float] = None
@@ -788,6 +794,49 @@ class ScoreboardApp:
 
         return None
 
+    def _record_crown_stream_object(self, stream_kind: str, object_id: int) -> None:
+        """Track which stream/object IDs are actually present in decoded frames."""
+        stream = str(stream_kind).strip().lower()
+        if stream not in {"input", "output"}:
+            return
+
+        self.crown_stream_frame_counts[stream] = self.crown_stream_frame_counts.get(stream, 0) + 1
+        if object_id <= 0:
+            return
+
+        if stream == "input":
+            hit_map = self.crown_seen_input_object_hits
+        else:
+            hit_map = self.crown_seen_output_object_hits
+
+        previous = hit_map.get(object_id, 0)
+        hit_map[object_id] = previous + 1
+        if previous == 0:
+            logger.info(
+                "Crown stream object detected: stream=%s object=%s (0x%08X)",
+                stream,
+                self._format_hiqnet_object_id(object_id),
+                object_id,
+            )
+
+    @staticmethod
+    def _format_hiqnet_object_id(object_id: int) -> str:
+        """Format integer HiQnet object ID as dotted path (A.B.C)."""
+        a = (int(object_id) >> 16) & 0xFF
+        b = (int(object_id) >> 8) & 0xFF
+        c = int(object_id) & 0xFF
+        return f"{a}.{b}.{c}"
+
+    def _summarize_crown_object_hits(self, hit_map: Dict[int, int], limit: int = 6) -> str:
+        """Create compact object hit summary ordered by object ID."""
+        if not hit_map:
+            return "none"
+
+        parts: List[str] = []
+        for object_id in sorted(hit_map.keys())[: max(1, int(limit))]:
+            parts.append(f"{self._format_hiqnet_object_id(object_id)}:{hit_map[object_id]}")
+        return ",".join(parts)
+
     def _maybe_log_crown_udp_stats(self, now: float) -> None:
         """Emit periodic Crown UDP ingest stats at INFO for field diagnostics."""
         if (now - self.crown_last_udp_stats_log_time) < self.crown_udp_stats_log_interval_seconds:
@@ -807,7 +856,7 @@ class ScoreboardApp:
             level_summary = f"{level_min:.3f}..{level_max:.3f} ({level_count})"
 
         logger.info(
-            "Crown UDP stats: packets=%d parsed=%d unparsed=%d subscribe_tx=%d src(short=%d probe=%d frame=%d marker=%d none=%d) level_window=%s last_payload_age=%.2fs",
+            "Crown UDP stats: packets=%d parsed=%d unparsed=%d subscribe_tx=%d src(short=%d probe=%d frame=%d marker=%d none=%d) stream_frames(input=%d output=%d) objects(input=%s output=%s) level_window=%s last_payload_age=%.2fs",
             self.crown_udp_packet_log_counter,
             self.crown_udp_parsed_log_counter,
             self.crown_udp_unparsed_log_counter,
@@ -817,6 +866,10 @@ class ScoreboardApp:
             self.crown_decode_source_counts.get("frame", 0),
             self.crown_decode_source_counts.get("marker", 0),
             self.crown_decode_source_counts.get("none", 0),
+            self.crown_stream_frame_counts.get("input", 0),
+            self.crown_stream_frame_counts.get("output", 0),
+            self._summarize_crown_object_hits(self.crown_seen_input_object_hits),
+            self._summarize_crown_object_hits(self.crown_seen_output_object_hits),
             level_summary,
             last_age,
         )
@@ -1574,6 +1627,7 @@ class ScoreboardApp:
         if stream_resolution is None:
             return None
         stream_kind, channel_id = stream_resolution
+        self._record_crown_stream_object(stream_kind, object_id)
 
         p = offset + header_len
         if p + 2 > frame_end:
@@ -1640,6 +1694,7 @@ class ScoreboardApp:
         if stream_resolution is None:
             return None
         stream_kind, channel_id = stream_resolution
+        self._record_crown_stream_object(stream_kind, object_id)
         stream_target_param_id = self._preferred_crown_target_param_id(stream_kind)
 
         # Fast path for observed Crown 0x0101 layout: look for exact tuple marker
@@ -2494,6 +2549,9 @@ class ScoreboardApp:
             self.crown_output_level_by_channel = {}
             self.crown_smoothed_input_level_by_channel = {}
             self.crown_input_level_by_channel = {}
+            self.crown_stream_frame_counts = {"input": 0, "output": 0}
+            self.crown_seen_input_object_hits = {}
+            self.crown_seen_output_object_hits = {}
 
     def _close_crown_udp_socket(self) -> None:
         """Close UDP socket used by Crown mode."""
