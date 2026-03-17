@@ -143,6 +143,13 @@ class ScoreboardApp:
             )
         )
         self.crown_subscribe_payload_bytes = self._parse_hex_payload(self.crown_subscribe_payload_hex)
+        self.crown_input_subscribe_payload_hex = str(
+            crown_config.get(
+                "input_subscribe_payload_hex",
+                "02,19,00,00,00,2B,00,33,00,00,00,00,0E,EC,00,01,08,01,01,0F,00,20,05,00,00,00,01,00,00,00,00,33,00,01,08,01,00,00,00,00,00,00,00",
+            )
+        )
+        self.crown_input_subscribe_payload_bytes = self._parse_hex_payload(self.crown_input_subscribe_payload_hex)
         self.crown_subscribe_use_subscribe_all_sensor = bool(
             crown_config.get("subscribe_use_subscribe_all_sensor", False)
         )
@@ -1203,6 +1210,7 @@ class ScoreboardApp:
     def _resolve_crown_subscribe_payloads(self) -> List[bytes]:
         """Return payloads for the configured Crown object target range."""
         payloads: List[bytes] = []
+        # Output meter subscribe payloads
         for object_id in self._crown_target_object_ids():
             if self.crown_subscribe_use_subscribe_all_sensor:
                 generated = self._build_subscribe_all_sensor_payload(object_id)
@@ -1212,6 +1220,9 @@ class ScoreboardApp:
             legacy_payload = self._build_legacy_crown_subscribe_payload(object_id)
             if legacy_payload:
                 payloads.append(legacy_payload)
+        # Input meter subscribe payload (raw, as provided)
+        if self.crown_input_subscribe_payload_bytes:
+            payloads.append(self.crown_input_subscribe_payload_bytes)
         return payloads
 
     def _resolve_legacy_crown_subscribe_payloads(self) -> List[bytes]:
