@@ -689,7 +689,7 @@ class LEDScoreboard:
         levels_db: List[float],
         min_db: float = -60.0,
         max_db: float = 0.0,
-        color: tuple = (0, 50, 255),
+        color: tuple = (0, 25, 255),
     ) -> None:
         """Render four vertical meters (5px wide, no labels) for channel monitoring."""
         if self.matrix is None:
@@ -722,7 +722,7 @@ class LEDScoreboard:
                 bar_right = x + bar_width - 1
 
                 # Dim background track
-                draw.rectangle([(x, bar_top), (bar_right, bar_bottom)], fill=(0, 25, 25))
+                draw.rectangle([(x, bar_top), (bar_right, bar_bottom)], fill=(0, 10, 25))
 
                 # Level fill from bottom upward
                 if fill_height > 0:
