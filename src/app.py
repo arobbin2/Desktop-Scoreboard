@@ -280,6 +280,10 @@ class ScoreboardApp:
             crown_config.get("fallback_to_scoreboard_on_stale", True)
         )
         self.crown_waiting_text = str(crown_config.get("waiting_text", "CROWN WAIT")).strip() or "CROWN WAIT"
+        self.crown_meter_color = self._parse_rgb_tuple(
+            crown_config.get("meter_color", crown_config.get("color", [0, 25, 255])),
+            fallback=(0, 255, 255),
+        )
 
         mode_config = self.config.get("modes") or {}
         requested_default_mode = str(mode_config.get("default_mode", "scoreboard"))
@@ -608,7 +612,7 @@ class ScoreboardApp:
                 levels,
                 min_db=self.crown_meter_min_db,
                 max_db=self.crown_meter_max_db,
-                color=(0, 255, 255),
+                color=self.crown_meter_color,
             )
         elif has_meter_level and hasattr(self.scoreboard, "display_single_meter"):
             self.scoreboard.display_single_meter(
@@ -616,10 +620,10 @@ class ScoreboardApp:
                 label="CROWN",
                 min_db=self.crown_meter_min_db,
                 max_db=self.crown_meter_max_db,
-                color=(0, 255, 255),
+                color=self.crown_meter_color,
             )
         else:
-            self.scoreboard.display_text(render_text, color=(0, 255, 255))
+            self.scoreboard.display_text(render_text, color=self.crown_meter_color)
 
     def _ensure_crown_udp_socket(self) -> None:
         """Create a non-blocking UDP socket for Crown meter data if needed."""
@@ -2505,6 +2509,19 @@ class ScoreboardApp:
             return parsed
         except (TypeError, ValueError):
             return None
+
+    @staticmethod
+    def _parse_rgb_tuple(value: Any, fallback: Tuple[int, int, int]) -> Tuple[int, int, int]:
+        """Parse RGB tuple/list values and clamp each component to [0, 255]."""
+        if isinstance(value, (list, tuple)) and len(value) == 3:
+            try:
+                red = max(0, min(255, int(value[0])))
+                green = max(0, min(255, int(value[1])))
+                blue = max(0, min(255, int(value[2])))
+                return (red, green, blue)
+            except (TypeError, ValueError):
+                return fallback
+        return fallback
 
     def _maybe_refresh_weather(self, now: float) -> None:
         """Refresh cached weather data at the configured interval."""
