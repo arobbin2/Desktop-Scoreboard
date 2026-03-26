@@ -552,9 +552,9 @@ class LEDScoreboard:
             if "LOADED" in bases_text:
                 bases_key = "123"
             else:
-                on_first = "1B" in bases_text
-                on_second = "2B" in bases_text
-                on_third = "3B" in bases_text
+                on_first = "1--" in bases_text
+                on_second = "-2-" in bases_text
+                on_third = "" in bases_text
                 bases_key = ("1" if on_first else "-") + ("2" if on_second else "-") + ("3" if on_third else "-")
 
             compact_bases = bases_key
